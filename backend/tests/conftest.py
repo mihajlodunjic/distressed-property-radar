@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from alembic import command
 
@@ -33,6 +34,23 @@ def alembic_config() -> Config:
 @pytest.fixture(scope="session", autouse=True)
 def migrated_test_database() -> None:
     command.upgrade(alembic_config(), "head")
+
+
+@pytest.fixture
+def db_session() -> Session:
+    from app.db.session import get_engine
+
+    connection = get_engine().connect()
+    transaction = connection.begin()
+    session = Session(bind=connection)
+
+    try:
+        yield session
+    finally:
+        session.close()
+        if transaction.is_active:
+            transaction.rollback()
+        connection.close()
 
 
 @pytest.fixture

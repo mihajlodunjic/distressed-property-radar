@@ -1,0 +1,314 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from decimal import Decimal
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy import Enum as SQLAlchemyEnum
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.db.base import Base
+from app.domain.enums import (
+    CurrencyCode,
+    DataSourceKind,
+    ListingEventType,
+    ListingStatus,
+    PropertyPipelineStatus,
+    PropertyType,
+    SellerType,
+)
+
+
+def _uuid_pk() -> uuid.UUID:
+    return uuid.uuid4()
+
+
+def _enum_column(enum_class: type[object], length: int) -> SQLAlchemyEnum:
+    return SQLAlchemyEnum(
+        enum_class,
+        native_enum=False,
+        values_callable=lambda enum_values: [item.value for item in enum_values],
+        validate_strings=True,
+        length=length,
+    )
+
+
+class Source(Base):
+    __tablename__ = "sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    source_type: Mapped[DataSourceKind] = mapped_column(
+        _enum_column(DataSourceKind, 32),
+        nullable=False,
+    )
+    base_url: Mapped[str | None] = mapped_column(Text)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    supports_discovery: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    supports_market_scan: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    supports_detail_fetch: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    supports_transaction_data: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    runtime_state: Mapped[SourceRuntimeState | None] = relationship(
+        back_populates="source",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    listings: Mapped[list[Listing]] = relationship(back_populates="source")
+    job_runs: Mapped[list[JobRun]] = relationship(back_populates="source")
+
+
+class SourceRuntimeState(Base):
+    __tablename__ = "source_runtime_state"
+
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sources.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_discovery_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_market_scan_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error_type: Mapped[str | None] = mapped_column(String(100))
+    last_error_message: Mapped[str | None] = mapped_column(Text)
+    recent_http_error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    recent_parse_error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_discovered_count: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    source: Mapped[Source] = relationship(back_populates="runtime_state")
+
+
+class Property(Base):
+    __tablename__ = "properties"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_type: Mapped[PropertyType] = mapped_column(
+        _enum_column(PropertyType, 32),
+        nullable=False,
+    )
+    country_code: Mapped[str | None] = mapped_column(String(2))
+    city: Mapped[str | None] = mapped_column(String(120))
+    municipality: Mapped[str | None] = mapped_column(String(120))
+    neighborhood: Mapped[str | None] = mapped_column(String(120))
+    micro_location: Mapped[str | None] = mapped_column(String(255))
+    street: Mapped[str | None] = mapped_column(String(255))
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    location_precision: Mapped[str | None] = mapped_column(String(50))
+    location_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    size_m2: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    rooms: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    bedrooms: Mapped[int | None] = mapped_column(Integer)
+    floor: Mapped[int | None] = mapped_column(Integer)
+    total_floors: Mapped[int | None] = mapped_column(Integer)
+    elevator: Mapped[bool | None] = mapped_column(Boolean)
+    construction_year: Mapped[int | None] = mapped_column(Integer)
+    building_type: Mapped[str | None] = mapped_column(String(100))
+    heating_type: Mapped[str | None] = mapped_column(String(100))
+    parking: Mapped[bool | None] = mapped_column(Boolean)
+    garage: Mapped[bool | None] = mapped_column(Boolean)
+    terrace: Mapped[bool | None] = mapped_column(Boolean)
+    condition_category: Mapped[str | None] = mapped_column(String(100))
+    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    active_listing_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    estimated_market_age_days: Mapped[int | None] = mapped_column(Integer)
+    relist_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pipeline_status: Mapped[PropertyPipelineStatus] = mapped_column(
+        _enum_column(PropertyPipelineStatus, 40),
+        nullable=False,
+        default=PropertyPipelineStatus.NEW,
+    )
+    pipeline_status_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    listings: Mapped[list[Listing]] = relationship(back_populates="property")
+
+
+class Listing(Base):
+    __tablename__ = "listings"
+    __table_args__ = (
+        UniqueConstraint("source_id", "external_listing_id", name="uq_listings_source_external_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sources.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    external_listing_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    property_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="SET NULL"),
+    )
+    url: Mapped[str | None] = mapped_column(Text)
+    canonical_url: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    asking_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    currency: Mapped[CurrencyCode | None] = mapped_column(_enum_column(CurrencyCode, 3))
+    size_m2: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    price_per_m2: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    city_raw: Mapped[str | None] = mapped_column(String(255))
+    location_raw: Mapped[str | None] = mapped_column(Text)
+    rooms: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    bedrooms: Mapped[int | None] = mapped_column(Integer)
+    floor: Mapped[int | None] = mapped_column(Integer)
+    total_floors: Mapped[int | None] = mapped_column(Integer)
+    elevator: Mapped[bool | None] = mapped_column(Boolean)
+    construction_year: Mapped[int | None] = mapped_column(Integer)
+    building_type: Mapped[str | None] = mapped_column(String(100))
+    heating_type: Mapped[str | None] = mapped_column(String(100))
+    parking: Mapped[bool | None] = mapped_column(Boolean)
+    garage: Mapped[bool | None] = mapped_column(Boolean)
+    terrace: Mapped[bool | None] = mapped_column(Boolean)
+    condition_raw: Mapped[str | None] = mapped_column(String(255))
+    legal_status_raw: Mapped[str | None] = mapped_column(String(255))
+    seller_type: Mapped[SellerType] = mapped_column(
+        _enum_column(SellerType, 40),
+        nullable=False,
+        default=SellerType.UNKNOWN,
+    )
+    seller_name: Mapped[str | None] = mapped_column(String(255))
+    agency_name: Mapped[str | None] = mapped_column(String(255))
+    seller_phone: Mapped[str | None] = mapped_column(String(100))
+    seller_contact_raw: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[ListingStatus] = mapped_column(
+        _enum_column(ListingStatus, 20),
+        nullable=False,
+        default=ListingStatus.UNKNOWN,
+    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_detail_fetch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_card_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    card_state_hash: Mapped[str | None] = mapped_column(String(128))
+    detail_state_hash: Mapped[str | None] = mapped_column(String(128))
+    llm_input_hash: Mapped[str | None] = mapped_column(String(128))
+    crawl_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    source: Mapped[Source] = relationship(back_populates="listings")
+    property: Mapped[Property | None] = relationship(back_populates="listings")
+    events: Mapped[list[ListingEvent]] = relationship(
+        back_populates="listing",
+        cascade="all, delete-orphan",
+    )
+
+
+class ListingEvent(Base):
+    __tablename__ = "listing_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    listing_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("listings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    event_type: Mapped[ListingEventType] = mapped_column(
+        _enum_column(ListingEventType, 40),
+        nullable=False,
+    )
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    old_value_json: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    new_value_json: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    source_record_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    old_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    new_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    listing: Mapped[Listing] = relationship(back_populates="events")
+
+
+class JobRun(Base):
+    __tablename__ = "job_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    job_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("sources.id", ondelete="SET NULL"),
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    items_discovered: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    items_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    items_changed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    items_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    source: Mapped[Source | None] = relationship(back_populates="job_runs")

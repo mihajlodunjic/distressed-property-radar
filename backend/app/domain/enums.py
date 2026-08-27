@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class PropertyType(StrEnum):
+    APARTMENT = "APARTMENT"
+    HOUSE = "HOUSE"
+    LAND = "LAND"
+    COMMERCIAL = "COMMERCIAL"
+    OTHER = "OTHER"
+
+
+class CurrencyCode(StrEnum):
+    EUR = "EUR"
+    RSD = "RSD"
+
+
+class ListingStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    NOT_SEEN = "NOT_SEEN"
+    REMOVED = "REMOVED"
+    UNKNOWN = "UNKNOWN"
+
+
+class SellerType(StrEnum):
+    OWNER = "OWNER"
+    AGENCY = "AGENCY"
+    INVESTOR = "INVESTOR"
+    BANK = "BANK"
+    COURT_OR_ENFORCEMENT = "COURT_OR_ENFORCEMENT"
+    OTHER = "OTHER"
+    UNKNOWN = "UNKNOWN"
+
+
+class PropertyPipelineStatus(StrEnum):
+    NEW = "NEW"
+    REVIEWED = "REVIEWED"
+    CALLED = "CALLED"
+    VISIT_SCHEDULED = "VISIT_SCHEDULED"
+    VISITED = "VISITED"
+    DUE_DILIGENCE = "DUE_DILIGENCE"
+    OFFERED = "OFFERED"
+    NEGOTIATING = "NEGOTIATING"
+    WON = "WON"
+    LOST = "LOST"
+    SKIPPED = "SKIPPED"
+    SOLD = "SOLD"
+
+
+class DataSourceKind(StrEnum):
+    SCRAPED = "SCRAPED"
+    DERIVED = "DERIVED"
+    LLM = "LLM"
+    MANUAL = "MANUAL"
+    VERIFIED_MANUAL = "VERIFIED_MANUAL"
+    TRANSACTION_DATA = "TRANSACTION_DATA"
+    IMPORT = "IMPORT"
+
+
+class ListingEventType(StrEnum):
+    DISCOVERED = "DISCOVERED"
+    PRICE_CHANGED = "PRICE_CHANGED"
+    TITLE_CHANGED = "TITLE_CHANGED"
+    DESCRIPTION_CHANGED = "DESCRIPTION_CHANGED"
+    SELLER_CHANGED = "SELLER_CHANGED"
+    STATUS_CHANGED = "STATUS_CHANGED"
+    REMOVED = "REMOVED"
+    REAPPEARED = "REAPPEARED"
+    DETAIL_CHANGED = "DETAIL_CHANGED"
