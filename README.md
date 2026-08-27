@@ -338,19 +338,72 @@ The repository contains the persistent project context.
 
 ## Local Development
 
-Canonical setup, startup, migration and test commands should be documented here only after they actually exist in the repository.
+Phase 0 defines the repository foundation, local database service, backend startup, migrations,
+tests, and frontend shell.
 
-Until Phase 0 defines them, do not invent commands.
+Create a local environment file:
 
-Expected categories will eventually include:
+```powershell
+Copy-Item .env.example .env
+```
+
+Start PostgreSQL/PostGIS:
+
+```powershell
+docker compose up -d postgres
+```
+
+Install and run the backend:
+
+```powershell
+Set-Location backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\alembic.exe upgrade head
+.\.venv\Scripts\uvicorn.exe app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Run backend checks:
+
+```powershell
+Set-Location backend
+.\.venv\Scripts\pytest.exe
+.\.venv\Scripts\ruff.exe check .
+```
+
+Install and run the frontend:
+
+```powershell
+Set-Location frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+Run frontend checks:
+
+```powershell
+Set-Location frontend
+npm.cmd run typecheck
+npm.cmd run build
+```
+
+Check application health:
+
+```powershell
+curl.exe -i http://127.0.0.1:8000/health
+```
+
+Check PostGIS:
+
+```powershell
+docker compose exec postgres psql -U distressed_property_radar -d distressed_property_radar -c "SELECT postgis_version();"
+```
+
+Verify the persistent development volume by recreating containers without removing volumes:
 
 ```text
-environment setup
-application startup
-database migrations
-tests
-lint / formatting / type checks
-Docker development
+docker compose down
+docker compose up -d postgres
 ```
 
 The actual repository configuration is authoritative.
