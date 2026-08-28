@@ -8,11 +8,11 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 5 - Location, Features & Market Dataset
-    Current task: Phase 5 - implement normalized location, property features, effective property data, and Data Quality V1
+    Current phase: PHASE 6 - Comparable Engine & V1 Valuation
+    Current task: Phase 6 - implement comparable selection and V1 valuation
     Task state: READY
 
-Phase 4 is complete.
+Phase 5 is complete.
 
 ## Completed Phases
 
@@ -21,10 +21,11 @@ Phase 4 is complete.
     PHASE 2 - First Source: Basic Ingestion: COMPLETED
     PHASE 3 - Continuous Crawling & Listing History: COMPLETED
     PHASE 4 - Property Resolution & Duplicate Matching: COMPLETED
+    PHASE 5 - Location, Features & Market Dataset: COMPLETED
 
 ## Completed Tasks
 
-- Phase 4 property resolution, deterministic duplicate matching, candidate generation, manual-match precedence, and matching persistence are implemented and verified.
+- Phase 5 normalized location, effective property data, property features, market dataset recalculation, Data Quality V1, and persistence are implemented and verified.
 
 ## Current Implementation Facts
 
@@ -33,8 +34,8 @@ Phase 4 is complete.
 - Backend logging: basic startup logging exists and does not log secrets.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
 - Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, and `MatchCandidateStatus` exist in `backend/app/domain/enums.py`.
-- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, and `JobRun` exist in `backend/app/db/models.py`.
-- Migrations: Alembic is configured; current head is `0005_property_matching`.
+- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, and `JobRun` exist in `backend/app/db/models.py`.
+- Migrations: Alembic is configured; current head is `0006_market_dataset`.
 - Bootstrap sources: migrations seed stable `manual` and `four_zida` sources with `source_runtime_state` rows.
 - Critical listing invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
 - `listing_raw_records` stores deduped CARD/DETAIL raw payloads by listing, record type, and content hash.
@@ -61,8 +62,14 @@ Phase 4 is complete.
 - Manual matches are preserved by automatic reruns and are not silently reassigned.
 - Rejected candidates are not recreated as pending candidates by ordinary reruns.
 - Matching reruns are idempotent and do not create uncontrolled duplicate properties, links, or candidates.
+- Location normalization: `backend/app/locations/normalization.py` implements `location_rules_v1` for the initial target market microzones. V0 stores normalized location directly on `properties`; no separate `locations` taxonomy/table exists yet.
+- Market dataset: `backend/app/features/property_dataset.py` computes `property_features_v1`, `effective_property_data_v1`, and `data_quality_v1` for existing matched properties.
+- Property features are persisted in `property_features` as recalculable derived/cache values keyed by property and feature version.
+- Data Quality V1 is persisted in `data_quality_assessments` with the Analysis Specification weights, critical missing fields, factor points, and rules version.
+- Effective property data prefers current property values over listing values, fills only unknown property attributes from linked listings, and carries existing property latitude/longitude without inventing geocodes.
+- Phase 5 recalculation is idempotent for the same property/version and updates existing feature/quality rows when canonical listing/history inputs change.
 - Parser fixtures exist under `backend/tests/fixtures/four_zida` and do not depend on live portal state.
-- Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, zero-result anomaly safety, Phase 4 duplicate matching, ambiguous candidates, non-matches, manual precedence, rejected candidate behavior, and idempotent matching.
+- Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, zero-result anomaly safety, Phase 4 duplicate matching, ambiguous candidates, non-matches, manual precedence, rejected candidate behavior, idempotent matching, Phase 5 location normalization, historical feature calculation, market age/relist distinction, effective values, Data Quality V1, missing critical fields, and recalculation.
 - Health endpoint: `GET /health` checks application process, PostgreSQL connectivity, and PostGIS availability.
 - Frontend: minimal Vite React shell exists under `frontend`.
 - `.env.example` documents required variable names with local-only example values and no real secrets.
@@ -88,22 +95,23 @@ Phase 4 is complete.
 
 Implement only:
 
-    PHASE 5 - Location, Features & Market Dataset
+    PHASE 6 - Comparable Engine & V1 Valuation
 
 Exact first logical task:
 
-    Implement the minimal Phase 5 normalized location and property-feature calculation
-    flow for existing matched properties, including effective property attributes,
-    historical derived features, Data Quality V1, and reproducible recalculation from
-    canonical listing/history inputs.
+    Implement the minimal Phase 6 comparable selection and V1 valuation flow using
+    listing comparables, including comparable_sets/comparable_items/valuations
+    persistence, similarity scoring, adaptive radius, location/size/recency filters,
+    outlier handling, FMV low/base/high, valuation confidence, explanation, and
+    INSUFFICIENT_DATA.
 
 Do not implement:
 
-- comparable engine;
-- valuation;
+- production transaction import;
 - liquidity analysis;
 - seller/risk intelligence;
 - LLM extraction;
+- opportunity scoring;
 - opportunity alerts;
 - additional markets or sources.
 
@@ -116,49 +124,55 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 5 - Location, Features & Market Dataset
+    -> PHASE 6 - Comparable Engine & V1 Valuation
 
 Relevant specification sections only:
 
     docs/03-data-model.md
-    -> properties
-    -> locations
-    -> property_features
-    -> Effective Property Data / provenance
+    -> comparable_sets
+    -> comparable_items
+    -> valuations
 
     docs/05-analysis-specification.md
-    -> Effective Property Data
-    -> Data Quality
+    -> Comparable Engine
+    -> Comparable Similarity
+    -> Outliers
+    -> Fair Market Value
+    -> Valuation Confidence
+    -> Valuation Failure
+    -> Explainability
 
     docs/08-testing-specification.md
-    -> property feature tests
-    -> data quality tests
-    -> recalculation/idempotency tests relevant to Phase 5
+    -> comparable/valuation tests relevant to Phase 6
 
 Existing implementation to inspect:
 
     backend/app/domain/enums.py
     backend/app/db/models.py
     backend/alembic/
+    backend/app/features/
+    backend/app/locations/
     backend/app/ingestion/
     backend/app/matching/
     backend/tests/
 
-Do not load later-phase specifications unless a concrete Phase 5 dependency requires them.
+Do not load later-phase specifications unless a concrete Phase 6 dependency requires them.
 
-## Phase 5 Completion Gate
+## Phase 6 Completion Gate
 
-Phase 5 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
+Phase 6 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
 
 At minimum verify that a relevant property can reproducibly produce:
 
-- normalized location;
-- effective attributes;
-- historical derived features;
-- Data Quality V1;
-- missing critical fields.
+- market-reasonable listing comparables;
+- no mixing of listing comps with transaction comps;
+- explainable outlier handling;
+- FMV low/base/high;
+- valuation confidence that reacts to input quality;
+- INSUFFICIENT_DATA instead of false FMV;
+- enough comparable references to reconstruct WHY.
 
-Changing canonical/history input must support recalculation.
+Before Phase 7, manually review a representative sample of valuations. If valuations are poor, improve location, effective data, comps, data quality, or valuation before building downstream opportunity logic.
 
 ## Update Rules
 

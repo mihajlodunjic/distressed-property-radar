@@ -183,6 +183,14 @@ class Property(Base):
         back_populates="candidate_property",
         cascade="all, delete-orphan",
     )
+    features: Mapped[list[PropertyFeature]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    data_quality_assessments: Mapped[list[DataQualityAssessment]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
 
 
 class Listing(Base):
@@ -445,6 +453,91 @@ class PropertyMatchCandidate(Base):
 
     listing: Mapped[Listing] = relationship(back_populates="match_candidates")
     candidate_property: Mapped[Property] = relationship(back_populates="match_candidates")
+
+
+class PropertyFeature(Base):
+    __tablename__ = "property_features"
+    __table_args__ = (
+        UniqueConstraint(
+            "property_id",
+            "feature_version",
+            name="uq_property_features_property_version",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    price_per_m2: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    listing_age_days: Mapped[int | None] = mapped_column(Integer)
+    property_market_age_days: Mapped[int | None] = mapped_column(Integer)
+    active_listing_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    known_listing_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    relist_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_lowest_asking_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    current_highest_asking_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    total_price_drop_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
+    price_drop_7d_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
+    price_drop_30d_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
+    price_cut_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    days_since_last_price_cut: Mapped[int | None] = mapped_column(Integer)
+    largest_price_cut_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
+    owner_listing_present: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    agency_listing_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    feature_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="features")
+
+
+class DataQualityAssessment(Base):
+    __tablename__ = "data_quality_assessments"
+    __table_args__ = (
+        UniqueConstraint(
+            "property_id",
+            "rules_version",
+            name="uq_data_quality_assessments_property_rules",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    score: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    missing_critical_fields_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    positive_factors_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    rules_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="data_quality_assessments")
 
 
 class JobRun(Base):
