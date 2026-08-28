@@ -8,20 +8,22 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 2 - First Source: Basic Ingestion
-    Current task: Phase 2 - implement first-source basic ingestion
+    Current phase: PHASE 4 - Property Resolution & Duplicate Matching
+    Current task: Phase 4 - implement property resolution and duplicate matching
     Task state: READY
 
-Phase 1 is complete.
+Phase 3 is complete.
 
 ## Completed Phases
 
     PHASE 0 - Repository & Development Foundation: COMPLETED
     PHASE 1 - Core Database & Domain Foundation: COMPLETED
+    PHASE 2 - First Source: Basic Ingestion: COMPLETED
+    PHASE 3 - Continuous Crawling & Listing History: COMPLETED
 
 ## Completed Tasks
 
-- Phase 1 minimal persistence/domain model is implemented and verified.
+- Phase 3 continuous crawling, source health, listing lifecycle/history, and job handling are implemented and verified for `four_zida`.
 
 ## Current Implementation Facts
 
@@ -29,24 +31,30 @@ Phase 1 is complete.
 - Backend configuration: centralized settings in `backend/app/core/config.py`, loaded from environment variables and optional root `.env`.
 - Backend logging: basic startup logging exists and does not log secrets.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
-- Domain enums: Phase 1 enums exist in `backend/app/domain/enums.py`.
-- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, and `JobRun` exist in `backend/app/db/models.py`.
-- Migrations: Alembic is configured; current head is `0002_core_domain_foundation`.
-- Bootstrap source: migration seeds a stable `manual` source and `source_runtime_state` row.
-- Critical Phase 1 invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
-- Money and area fields use PostgreSQL `NUMERIC`; timestamps use `TIMESTAMPTZ`.
-- UNKNOWN semantics are represented with nullable fields where `UNKNOWN` differs from `false`, `0`, or an empty string.
-- Listing lifecycle supports `ACTIVE`, `NOT_SEEN`, `REMOVED`, and `UNKNOWN`.
-- PostgreSQL/PostGIS: Docker Compose service `postgres` uses `postgis/postgis:16-3.5`.
-- Development DB host port: `55432` by default to avoid collisions with local PostgreSQL on `5432`.
-- Database storage: Compose uses persistent volume `postgres_data`.
-- Test database: Compose initializes `distressed_property_radar_test` for backend integration tests.
-- Backend tests: pytest suite covers Phase 0 checks plus Phase 1 tables, bootstrap source, create/read records, listing uniqueness, source-scoped external IDs, nullable UNKNOWN semantics, numeric precision, lifecycle statuses, and timezone-aware timestamps.
-- Backend lint: Ruff is configured in `backend/pyproject.toml`.
+- Domain enums: Phase 1 enums plus `ListingRawRecordType` and `SourceHealthStatus` exist in `backend/app/domain/enums.py`.
+- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, and `JobRun` exist in `backend/app/db/models.py`.
+- Migrations: Alembic is configured; current head is `0004_continuous_crawling_state`.
+- Bootstrap sources: migrations seed stable `manual` and `four_zida` sources with `source_runtime_state` rows.
+- Critical listing invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
+- `listing_raw_records` stores deduped CARD/DETAIL raw payloads by listing, record type, and content hash.
+- `listings` keeps lifecycle state including `ACTIVE`, `NOT_SEEN`, `REMOVED`, timestamps, state hashes, and `consecutive_not_seen_count`.
+- `source_runtime_state` tracks source health, last success/attempt, mode-specific success timestamps, recent HTTP/parse errors, and zero-result anomalies.
+- `job_runs` records crawl metrics including pages requested, cards seen/parsed, new/changed listings, not-seen count, details fetched, parse errors, and HTTP errors.
+- First source: `backend/app/sources/four_zida` implements an HTTP-first 4zida adapter.
+- 4zida discovery uses current target-market URLs for Zemun and Novi Beograd apartment sales with `m2From=35&m2To=90`.
+- 4zida adapter supports pagination, known-listing boundary stopping, mocked/live HTTP, retry/error classification, and detail fetch.
+- 4zida parser reads server-rendered JSON-LD ItemList/detail objects and falls back to listing links for identity only.
+- 4zida crawler modes exist: `FAST_DISCOVERY`, `ACTIVE_MARKET_SCAN`, and `DEEP_RECONCILIATION`.
+- CLI command: run from `backend` with `.\.venv\Scripts\python.exe -m app.ingestion.four_zida_discovery --mode fast-discovery --max-pages-per-market 1`.
+- Fast discovery persists new listings and refreshes known listings without duplicate business events.
+- Active market scan refreshes card observations, detects price changes, and only marks missing listings from complete non-anomalous scans.
+- Deep reconciliation confirms `NOT_SEEN` listings and records `REMOVED` only on explicit 404/410 detail confirmation.
+- Reappeared listings transition back to `ACTIVE` with one `REAPPEARED` event.
+- Failed, partial, parser-failed, and zero-result anomaly scans do not create false removals.
+- Parser fixtures exist under `backend/tests/fixtures/four_zida` and do not depend on live portal state.
+- Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, and zero-result anomaly safety.
 - Health endpoint: `GET /health` checks application process, PostgreSQL connectivity, and PostGIS availability.
 - Frontend: minimal Vite React shell exists under `frontend`.
-- Frontend routing: simple routes exist for `/` and `/system`.
-- Frontend API config: `VITE_API_BASE_URL` is used by `frontend/src/api.ts`.
 - `.env.example` documents required variable names with local-only example values and no real secrets.
 - Production deployment: none.
 - Production data: none.
@@ -63,28 +71,30 @@ Phase 1 is complete.
 
     Production deployed: NO
     Production crawler running: NO
-    Historical market dataset accumulating: NO
+    Historical market dataset accumulating: NO - no production crawler is running
     Historical data must be preserved: NO - no production data exists yet
 
 ## Next Task
 
 Implement only:
 
-    PHASE 2 - First Source: Basic Ingestion
+    PHASE 4 - Property Resolution & Duplicate Matching
 
 Exact first logical task:
 
-    Implement the minimal first-source adapter contract and one-time discovery flow for one
-    APARTMENT sale source in the current target market, using HTTP first if sufficient.
+    Introduce the minimal Phase 4 property-resolution persistence and deterministic
+    candidate generation flow that links existing listings to candidate properties,
+    records match decisions, creates a new Property when no conservative match exists,
+    and preserves every original Listing.
 
 Do not implement:
 
-- continuous monitoring;
-- removal detection;
-- duplicate property matching;
 - valuation;
-- LLM;
-- opportunity alerts.
+- liquidity analysis;
+- seller/risk intelligence;
+- LLM extraction;
+- opportunity alerts;
+- additional markets or sources.
 
 ## Required Context
 
@@ -95,65 +105,49 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 2 - First Source: Basic Ingestion
+    -> PHASE 4 - Property Resolution & Duplicate Matching
 
 Relevant specification sections only:
 
-    docs/04-scraping-specification.md
-    -> Source Adapter
-    -> Raw DTO
-    -> Listing Identity
-    -> HTTP pre Browsera
-    -> Pagination
-    -> Filters
-    -> Retry / Error Classification
+    docs/02-system-architecture.md
+    -> matching boundary
+    -> property/listing separation
 
     docs/03-data-model.md
-    -> listings
-    -> listing_raw_records, only if introduced by Phase 2
-    -> listing_events
-    -> sources / source_runtime_state
-    -> job_runs
+    -> properties
+    -> property_listing_links
+    -> property_match_candidates
+    -> merge/split invariants
+    -> images, only if needed
 
     docs/08-testing-specification.md
-    -> parser fixture tests
-    -> mocked HTTP source integration
-    -> ingestion idempotency tests
-    -> Phase 2 required test groups
+    -> property/listing identity tests
+    -> duplicate matching tests
+    -> idempotency tests relevant to Phase 4
 
 Existing implementation to inspect:
 
     backend/app/domain/enums.py
     backend/app/db/models.py
-    backend/app/db/
     backend/alembic/
+    backend/app/ingestion/
     backend/tests/
-    docker-compose.yml
-    .env.example
 
-Do not load later-phase specifications unless a concrete Phase 2 dependency requires them.
+Do not load later-phase specifications unless a concrete Phase 4 dependency requires them.
 
-## Phase 2 Completion Gate
+## Phase 4 Completion Gate
 
-Phase 2 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
+Phase 4 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
 
-At minimum verify:
+At minimum verify that a representative dataset can:
 
-- manual discovery fetches listing pages from one real source;
-- cards parse valid listing identities and useful raw fields;
-- needed details are fetched;
-- basic data is normalized;
-- listings are persisted;
-- repeated run does not duplicate listings;
-- expected discovery history is created;
-- job summary is recorded;
-- parser tests do not depend on live portal state.
+- merge obvious duplicate listings;
+- leave uncertain cases for review;
+- create a new property when there is no match;
+- preserve all original listings;
+- rerun matching without uncontrolled duplicate decisions.
 
-If any required criterion remains unresolved:
-
-    Current task: INCOMPLETE
-
-and record the concrete blocker or remaining work instead of advancing to Phase 3.
+Do not use ML for Phase 4 matching.
 
 ## Update Rules
 

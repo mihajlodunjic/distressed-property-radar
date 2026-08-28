@@ -4,6 +4,7 @@ Revision ID: 0002_core_domain_foundation
 Revises: 0001_enable_postgis
 Create Date: 2026-08-27 00:00:00.000000
 """
+
 from __future__ import annotations
 
 import sqlalchemy as sa

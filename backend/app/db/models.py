@@ -24,10 +24,12 @@ from app.domain.enums import (
     CurrencyCode,
     DataSourceKind,
     ListingEventType,
+    ListingRawRecordType,
     ListingStatus,
     PropertyPipelineStatus,
     PropertyType,
     SellerType,
+    SourceHealthStatus,
 )
 
 
@@ -99,6 +101,12 @@ class SourceRuntimeState(Base):
     last_error_message: Mapped[str | None] = mapped_column(Text)
     recent_http_error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     recent_parse_error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    consecutive_zero_result_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    health_status: Mapped[SourceHealthStatus] = mapped_column(
+        _enum_column(SourceHealthStatus, 20),
+        nullable=False,
+        default=SourceHealthStatus.HEALTHY,
+    )
     last_discovered_count: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -240,6 +248,7 @@ class Listing(Base):
     llm_input_hash: Mapped[str | None] = mapped_column(String(128))
     crawl_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consecutive_not_seen_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -255,6 +264,10 @@ class Listing(Base):
     source: Mapped[Source] = relationship(back_populates="listings")
     property: Mapped[Property | None] = relationship(back_populates="listings")
     events: Mapped[list[ListingEvent]] = relationship(
+        back_populates="listing",
+        cascade="all, delete-orphan",
+    )
+    raw_records: Mapped[list[ListingRawRecord]] = relationship(
         back_populates="listing",
         cascade="all, delete-orphan",
     )
@@ -288,6 +301,46 @@ class ListingEvent(Base):
     listing: Mapped[Listing] = relationship(back_populates="events")
 
 
+class ListingRawRecord(Base):
+    __tablename__ = "listing_raw_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "listing_id",
+            "record_type",
+            "content_hash",
+            name="uq_listing_raw_records_listing_type_hash",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    listing_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("listings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    record_type: Mapped[ListingRawRecordType] = mapped_column(
+        _enum_column(ListingRawRecordType, 16),
+        nullable=False,
+    )
+    source_url: Mapped[str | None] = mapped_column(Text)
+    raw_payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    parser_version: Mapped[str | None] = mapped_column(String(100))
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    listing: Mapped[Listing] = relationship(back_populates="raw_records")
+
+
 class JobRun(Base):
     __tablename__ = "job_runs"
 
@@ -304,6 +357,15 @@ class JobRun(Base):
     items_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     items_changed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     items_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pages_requested: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cards_seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cards_parsed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_listings: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    changed_listings: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    not_seen_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    details_fetched: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    parse_errors: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    http_errors: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_summary: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

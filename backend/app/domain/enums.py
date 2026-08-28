@@ -68,3 +68,15 @@ class ListingEventType(StrEnum):
     REMOVED = "REMOVED"
     REAPPEARED = "REAPPEARED"
     DETAIL_CHANGED = "DETAIL_CHANGED"
+
+
+class ListingRawRecordType(StrEnum):
+    CARD = "CARD"
+    DETAIL = "DETAIL"
+
+
+class SourceHealthStatus(StrEnum):
+    HEALTHY = "HEALTHY"
+    DEGRADED = "DEGRADED"
+    FAILED = "FAILED"
+    DISABLED = "DISABLED"

@@ -4,6 +4,7 @@ Revision ID: 0001_enable_postgis
 Revises:
 Create Date: 2026-08-27 00:00:00.000000
 """
+
 from __future__ import annotations
 
 from alembic import op
