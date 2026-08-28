@@ -80,3 +80,17 @@ class SourceHealthStatus(StrEnum):
     DEGRADED = "DEGRADED"
     FAILED = "FAILED"
     DISABLED = "DISABLED"
+
+
+class MatchDecision(StrEnum):
+    AUTO_MATCH = "AUTO_MATCH"
+    MANUAL_MATCH = "MANUAL_MATCH"
+    POSSIBLE_MATCH = "POSSIBLE_MATCH"
+    REJECTED_MATCH = "REJECTED_MATCH"
+
+
+class MatchCandidateStatus(StrEnum):
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"

@@ -8,11 +8,11 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 4 - Property Resolution & Duplicate Matching
-    Current task: Phase 4 - implement property resolution and duplicate matching
+    Current phase: PHASE 5 - Location, Features & Market Dataset
+    Current task: Phase 5 - implement normalized location, property features, effective property data, and Data Quality V1
     Task state: READY
 
-Phase 3 is complete.
+Phase 4 is complete.
 
 ## Completed Phases
 
@@ -20,10 +20,11 @@ Phase 3 is complete.
     PHASE 1 - Core Database & Domain Foundation: COMPLETED
     PHASE 2 - First Source: Basic Ingestion: COMPLETED
     PHASE 3 - Continuous Crawling & Listing History: COMPLETED
+    PHASE 4 - Property Resolution & Duplicate Matching: COMPLETED
 
 ## Completed Tasks
 
-- Phase 3 continuous crawling, source health, listing lifecycle/history, and job handling are implemented and verified for `four_zida`.
+- Phase 4 property resolution, deterministic duplicate matching, candidate generation, manual-match precedence, and matching persistence are implemented and verified.
 
 ## Current Implementation Facts
 
@@ -31,9 +32,9 @@ Phase 3 is complete.
 - Backend configuration: centralized settings in `backend/app/core/config.py`, loaded from environment variables and optional root `.env`.
 - Backend logging: basic startup logging exists and does not log secrets.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
-- Domain enums: Phase 1 enums plus `ListingRawRecordType` and `SourceHealthStatus` exist in `backend/app/domain/enums.py`.
-- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, and `JobRun` exist in `backend/app/db/models.py`.
-- Migrations: Alembic is configured; current head is `0004_continuous_crawling_state`.
+- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, and `MatchCandidateStatus` exist in `backend/app/domain/enums.py`.
+- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, and `JobRun` exist in `backend/app/db/models.py`.
+- Migrations: Alembic is configured; current head is `0005_property_matching`.
 - Bootstrap sources: migrations seed stable `manual` and `four_zida` sources with `source_runtime_state` rows.
 - Critical listing invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
 - `listing_raw_records` stores deduped CARD/DETAIL raw payloads by listing, record type, and content hash.
@@ -51,8 +52,17 @@ Phase 3 is complete.
 - Deep reconciliation confirms `NOT_SEEN` listings and records `REMOVED` only on explicit 404/410 detail confirmation.
 - Reappeared listings transition back to `ACTIVE` with one `REAPPEARED` event.
 - Failed, partial, parser-failed, and zero-result anomaly scans do not create false removals.
+- Matching module: `backend/app/matching/property_resolution.py` implements deterministic `deterministic_v1` property resolution without ML.
+- Matching uses cheap candidate filters before scoring; it does not evaluate every listing against every property.
+- Matching scores location, size, rooms, floor, and text signals; hard structured conflicts are rejected instead of forced into possible matches.
+- `listings.property_id` stores the current canonical property link.
+- `property_listing_links` preserves match provenance/history for automatic, manual, and new-property decisions.
+- `property_match_candidates` stores uncertain/rejected candidate state for review and idempotent reruns.
+- Manual matches are preserved by automatic reruns and are not silently reassigned.
+- Rejected candidates are not recreated as pending candidates by ordinary reruns.
+- Matching reruns are idempotent and do not create uncontrolled duplicate properties, links, or candidates.
 - Parser fixtures exist under `backend/tests/fixtures/four_zida` and do not depend on live portal state.
-- Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, and zero-result anomaly safety.
+- Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, zero-result anomaly safety, Phase 4 duplicate matching, ambiguous candidates, non-matches, manual precedence, rejected candidate behavior, and idempotent matching.
 - Health endpoint: `GET /health` checks application process, PostgreSQL connectivity, and PostGIS availability.
 - Frontend: minimal Vite React shell exists under `frontend`.
 - `.env.example` documents required variable names with local-only example values and no real secrets.
@@ -78,17 +88,18 @@ Phase 3 is complete.
 
 Implement only:
 
-    PHASE 4 - Property Resolution & Duplicate Matching
+    PHASE 5 - Location, Features & Market Dataset
 
 Exact first logical task:
 
-    Introduce the minimal Phase 4 property-resolution persistence and deterministic
-    candidate generation flow that links existing listings to candidate properties,
-    records match decisions, creates a new Property when no conservative match exists,
-    and preserves every original Listing.
+    Implement the minimal Phase 5 normalized location and property-feature calculation
+    flow for existing matched properties, including effective property attributes,
+    historical derived features, Data Quality V1, and reproducible recalculation from
+    canonical listing/history inputs.
 
 Do not implement:
 
+- comparable engine;
 - valuation;
 - liquidity analysis;
 - seller/risk intelligence;
@@ -105,25 +116,24 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 4 - Property Resolution & Duplicate Matching
+    -> PHASE 5 - Location, Features & Market Dataset
 
 Relevant specification sections only:
 
-    docs/02-system-architecture.md
-    -> matching boundary
-    -> property/listing separation
-
     docs/03-data-model.md
     -> properties
-    -> property_listing_links
-    -> property_match_candidates
-    -> merge/split invariants
-    -> images, only if needed
+    -> locations
+    -> property_features
+    -> Effective Property Data / provenance
+
+    docs/05-analysis-specification.md
+    -> Effective Property Data
+    -> Data Quality
 
     docs/08-testing-specification.md
-    -> property/listing identity tests
-    -> duplicate matching tests
-    -> idempotency tests relevant to Phase 4
+    -> property feature tests
+    -> data quality tests
+    -> recalculation/idempotency tests relevant to Phase 5
 
 Existing implementation to inspect:
 
@@ -131,23 +141,24 @@ Existing implementation to inspect:
     backend/app/db/models.py
     backend/alembic/
     backend/app/ingestion/
+    backend/app/matching/
     backend/tests/
 
-Do not load later-phase specifications unless a concrete Phase 4 dependency requires them.
+Do not load later-phase specifications unless a concrete Phase 5 dependency requires them.
 
-## Phase 4 Completion Gate
+## Phase 5 Completion Gate
 
-Phase 4 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
+Phase 5 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
 
-At minimum verify that a representative dataset can:
+At minimum verify that a relevant property can reproducibly produce:
 
-- merge obvious duplicate listings;
-- leave uncertain cases for review;
-- create a new property when there is no match;
-- preserve all original listings;
-- rerun matching without uncontrolled duplicate decisions.
+- normalized location;
+- effective attributes;
+- historical derived features;
+- Data Quality V1;
+- missing critical fields.
 
-Do not use ML for Phase 4 matching.
+Changing canonical/history input must support recalculation.
 
 ## Update Rules
 

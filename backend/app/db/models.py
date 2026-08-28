@@ -26,6 +26,8 @@ from app.domain.enums import (
     ListingEventType,
     ListingRawRecordType,
     ListingStatus,
+    MatchCandidateStatus,
+    MatchDecision,
     PropertyPipelineStatus,
     PropertyType,
     SellerType,
@@ -173,6 +175,14 @@ class Property(Base):
     )
 
     listings: Mapped[list[Listing]] = relationship(back_populates="property")
+    listing_links: Mapped[list[PropertyListingLink]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    match_candidates: Mapped[list[PropertyMatchCandidate]] = relationship(
+        back_populates="candidate_property",
+        cascade="all, delete-orphan",
+    )
 
 
 class Listing(Base):
@@ -271,6 +281,14 @@ class Listing(Base):
         back_populates="listing",
         cascade="all, delete-orphan",
     )
+    property_links: Mapped[list[PropertyListingLink]] = relationship(
+        back_populates="listing",
+        cascade="all, delete-orphan",
+    )
+    match_candidates: Mapped[list[PropertyMatchCandidate]] = relationship(
+        back_populates="listing",
+        cascade="all, delete-orphan",
+    )
 
 
 class ListingEvent(Base):
@@ -339,6 +357,94 @@ class ListingRawRecord(Base):
     )
 
     listing: Mapped[Listing] = relationship(back_populates="raw_records")
+
+
+class PropertyListingLink(Base):
+    __tablename__ = "property_listing_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "listing_id",
+            "property_id",
+            "decision",
+            "matching_version",
+            name="uq_property_listing_links_listing_property_decision_version",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    listing_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("listings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    decision: Mapped[MatchDecision] = mapped_column(
+        _enum_column(MatchDecision, 24),
+        nullable=False,
+    )
+    match_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    matching_method: Mapped[str] = mapped_column(String(100), nullable=False)
+    matching_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    reason_json: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    property: Mapped[Property] = relationship(back_populates="listing_links")
+    listing: Mapped[Listing] = relationship(back_populates="property_links")
+
+
+class PropertyMatchCandidate(Base):
+    __tablename__ = "property_match_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "listing_id",
+            "candidate_property_id",
+            "matching_version",
+            name="uq_property_match_candidates_listing_property_version",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    listing_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("listings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    candidate_property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    similarity_score: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    location_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    size_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    rooms_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    image_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    text_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    other_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    matching_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[MatchCandidateStatus] = mapped_column(
+        _enum_column(MatchCandidateStatus, 16),
+        nullable=False,
+        default=MatchCandidateStatus.PENDING,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    listing: Mapped[Listing] = relationship(back_populates="match_candidates")
+    candidate_property: Mapped[Property] = relationship(back_populates="match_candidates")
 
 
 class JobRun(Base):
