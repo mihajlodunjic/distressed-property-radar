@@ -21,8 +21,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.domain.enums import (
+    ComparableType,
     CurrencyCode,
     DataSourceKind,
+    FastSaleStatus,
+    LiquidityStatus,
     ListingEventType,
     ListingRawRecordType,
     ListingStatus,
@@ -32,6 +35,8 @@ from app.domain.enums import (
     PropertyType,
     SellerType,
     SourceHealthStatus,
+    ValuationModelType,
+    ValuationStatus,
 )
 
 
@@ -191,6 +196,22 @@ class Property(Base):
         back_populates="property",
         cascade="all, delete-orphan",
     )
+    comparable_sets: Mapped[list[ComparableSet]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    valuations: Mapped[list[Valuation]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    liquidity_assessments: Mapped[list[LiquidityAssessment]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    fast_sale_estimates: Mapped[list[FastSaleEstimate]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
 
 
 class Listing(Base):
@@ -297,6 +318,7 @@ class Listing(Base):
         back_populates="listing",
         cascade="all, delete-orphan",
     )
+    comparable_items: Mapped[list[ComparableItem]] = relationship(back_populates="listing")
 
 
 class ListingEvent(Base):
@@ -538,6 +560,210 @@ class DataQualityAssessment(Base):
     )
 
     property: Mapped[Property] = relationship(back_populates="data_quality_assessments")
+
+
+class ComparableSet(Base):
+    __tablename__ = "comparable_sets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    comparable_engine_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    search_parameters_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="comparable_sets")
+    items: Mapped[list[ComparableItem]] = relationship(
+        back_populates="comparable_set",
+        cascade="all, delete-orphan",
+    )
+    valuations: Mapped[list[Valuation]] = relationship(
+        back_populates="comparable_set",
+        cascade="all, delete-orphan",
+    )
+
+
+class ComparableItem(Base):
+    __tablename__ = "comparable_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    comparable_set_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("comparable_sets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    comparable_type: Mapped[ComparableType] = mapped_column(
+        _enum_column(ComparableType, 24),
+        nullable=False,
+    )
+    transaction_record_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    listing_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("listings.id", ondelete="SET NULL"),
+    )
+    property_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="SET NULL"),
+    )
+    similarity_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    distance_m: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    age_days_at_analysis: Mapped[int | None] = mapped_column(Integer)
+    price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    price_per_m2: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    weight: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    included_in_valuation: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    exclusion_reason: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    comparable_set: Mapped[ComparableSet] = relationship(back_populates="items")
+    listing: Mapped[Listing | None] = relationship(back_populates="comparable_items")
+    comparable_property: Mapped[Property | None] = relationship(foreign_keys=[property_id])
+
+
+class Valuation(Base):
+    __tablename__ = "valuations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    comparable_set_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("comparable_sets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[ValuationStatus] = mapped_column(
+        _enum_column(ValuationStatus, 32),
+        nullable=False,
+    )
+    fair_value_low: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    fair_value_base: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    fair_value_high: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    currency: Mapped[CurrencyCode] = mapped_column(_enum_column(CurrencyCode, 3), nullable=False)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    data_quality_at_analysis: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    model_type: Mapped[ValuationModelType] = mapped_column(
+        _enum_column(ValuationModelType, 40),
+        nullable=False,
+    )
+    model_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    input_summary_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    explanation_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="valuations")
+    comparable_set: Mapped[ComparableSet] = relationship(back_populates="valuations")
+    liquidity_assessments: Mapped[list[LiquidityAssessment]] = relationship(
+        back_populates="valuation",
+    )
+    fast_sale_estimates: Mapped[list[FastSaleEstimate]] = relationship(
+        back_populates="valuation",
+    )
+
+
+class LiquidityAssessment(Base):
+    __tablename__ = "liquidity_assessments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    valuation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("valuations.id", ondelete="SET NULL"),
+    )
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[LiquidityStatus] = mapped_column(
+        _enum_column(LiquidityStatus, 32),
+        nullable=False,
+    )
+    liquidity_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    probability_sale_30d: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    probability_sale_60d: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    probability_sale_90d: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    positive_factors_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    negative_factors_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    model_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="liquidity_assessments")
+    valuation: Mapped[Valuation | None] = relationship(back_populates="liquidity_assessments")
+    fast_sale_estimates: Mapped[list[FastSaleEstimate]] = relationship(
+        back_populates="liquidity_assessment",
+    )
+
+
+class FastSaleEstimate(Base):
+    __tablename__ = "fast_sale_estimates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    valuation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("valuations.id", ondelete="SET NULL"),
+    )
+    liquidity_assessment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("liquidity_assessments.id", ondelete="SET NULL"),
+    )
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[FastSaleStatus] = mapped_column(
+        _enum_column(FastSaleStatus, 32),
+        nullable=False,
+    )
+    value_low: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    value_base: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    value_high: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    target_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_probability: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    explanation_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="fast_sale_estimates")
+    valuation: Mapped[Valuation | None] = relationship(back_populates="fast_sale_estimates")
+    liquidity_assessment: Mapped[LiquidityAssessment | None] = relationship(
+        back_populates="fast_sale_estimates",
+    )
 
 
 class JobRun(Base):

@@ -8,11 +8,11 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 6 - Comparable Engine & V1 Valuation
-    Current task: Phase 6 - implement comparable selection and V1 valuation
+    Current phase: PHASE 8 - LLM Seller Intelligence & Risk
+    Current task: Phase 8 - implement minimal LLM seller intelligence and risk engine
     Task state: READY
 
-Phase 5 is complete.
+Phase 7 is complete.
 
 ## Completed Phases
 
@@ -22,10 +22,12 @@ Phase 5 is complete.
     PHASE 3 - Continuous Crawling & Listing History: COMPLETED
     PHASE 4 - Property Resolution & Duplicate Matching: COMPLETED
     PHASE 5 - Location, Features & Market Dataset: COMPLETED
+    PHASE 6 - Comparable Engine & V1 Valuation: COMPLETED
+    PHASE 7 - Liquidity & Fast-Sale Analysis: COMPLETED
 
 ## Completed Tasks
 
-- Phase 5 normalized location, effective property data, property features, market dataset recalculation, Data Quality V1, and persistence are implemented and verified.
+- Phase 7 rules-based liquidity assessment, liquidity confidence, Fast-Sale Value, target-day behavior, insufficient-data handling, versioning, persistence, and explainability are implemented and verified.
 
 ## Current Implementation Facts
 
@@ -33,9 +35,9 @@ Phase 5 is complete.
 - Backend configuration: centralized settings in `backend/app/core/config.py`, loaded from environment variables and optional root `.env`.
 - Backend logging: basic startup logging exists and does not log secrets.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
-- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, and `MatchCandidateStatus` exist in `backend/app/domain/enums.py`.
-- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, and `JobRun` exist in `backend/app/db/models.py`.
-- Migrations: Alembic is configured; current head is `0006_market_dataset`.
+- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, and `FastSaleStatus` exist in `backend/app/domain/enums.py`.
+- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, and `JobRun` exist in `backend/app/db/models.py`.
+- Migrations: Alembic is configured; current head is `0008_liquidity_fast_sale`.
 - Bootstrap sources: migrations seed stable `manual` and `four_zida` sources with `source_runtime_state` rows.
 - Critical listing invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
 - `listing_raw_records` stores deduped CARD/DETAIL raw payloads by listing, record type, and content hash.
@@ -68,8 +70,20 @@ Phase 5 is complete.
 - Data Quality V1 is persisted in `data_quality_assessments` with the Analysis Specification weights, critical missing fields, factor points, and rules version.
 - Effective property data prefers current property values over listing values, fills only unknown property attributes from linked listings, and carries existing property latitude/longitude without inventing geocodes.
 - Phase 5 recalculation is idempotent for the same property/version and updates existing feature/quality rows when canonical listing/history inputs change.
+- Valuation module: `backend/app/valuation/comparable_engine.py` implements `comparable_engine_v1` and `valuation_v1`.
+- Phase 6 V1 uses `LISTING` comparables only as asking-market evidence and does not model transaction comps as realized transaction prices.
+- Comparable sets and items are persisted with `as_of`, engine version, search parameters, listing/property references, snapshot price data, similarity, distance, recency age, weight, inclusion flag, and exclusion reason.
+- Valuations are immutable historical results linked to a comparable set; repeated same-input valuation runs create new valuation rows with reproducible values.
+- Valuation status can be `SUCCESS` or `INSUFFICIENT_DATA`; insufficient-data results do not invent FMV values.
+- V1 valuation uses deterministic weighted similarity, adaptive radius, size filtering, listing recency, IQR price-outlier exclusion, weighted-median asking EUR/m2, capped target adjustments, FMV low/base/high, confidence factors, and explanation JSON.
+- Liquidity module: `backend/app/liquidity/liquidity_engine.py` implements `liquidity_rules_v1` and `fast_sale_v1`.
+- Liquidity assessments are immutable historical results linked to properties and, when available, the successful valuation input.
+- Liquidity V1 uses deterministic property/market factors, separates positive factors, negative factors, and unknown important factors, and leaves sale-probability fields null because no outcome model exists.
+- Fast-sale estimates are persisted separately from FMV, link to the valuation and liquidity assessment inputs, carry target-day context, and keep `target_probability` null.
+- Fast-Sale V1 derives low/base/high from Phase 6 FMV, liquidity level, valuation confidence, valuation dispersion, and target horizon; it does not use LLM financial math or probabilistic sale timing.
+- Insufficient Phase 6 valuation input creates explicit `INSUFFICIENT_DATA` liquidity/fast-sale rows without fabricated liquidity scores or fast-sale values.
 - Parser fixtures exist under `backend/tests/fixtures/four_zida` and do not depend on live portal state.
-- Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, zero-result anomaly safety, Phase 4 duplicate matching, ambiguous candidates, non-matches, manual precedence, rejected candidate behavior, idempotent matching, Phase 5 location normalization, historical feature calculation, market age/relist distinction, effective values, Data Quality V1, missing critical fields, and recalculation.
+- Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, zero-result anomaly safety, Phase 4 duplicate matching, ambiguous candidates, non-matches, manual precedence, rejected candidate behavior, idempotent matching, Phase 5 location normalization, historical feature calculation, market age/relist distinction, effective values, Data Quality V1, missing critical fields, recalculation, Phase 6 comparable filtering/ranking, listing/transaction distinction, outliers, valuation, confidence behavior, insufficient data, historical `as_of` protection, Phase 7 liquidity rules, UNKNOWN behavior, Fast-Sale Value ordering, target-day behavior, and versioned persistence.
 - Health endpoint: `GET /health` checks application process, PostgreSQL connectivity, and PostGIS availability.
 - Frontend: minimal Vite React shell exists under `frontend`.
 - `.env.example` documents required variable names with local-only example values and no real secrets.
@@ -95,24 +109,23 @@ Phase 5 is complete.
 
 Implement only:
 
-    PHASE 6 - Comparable Engine & V1 Valuation
+    PHASE 8 - LLM Seller Intelligence & Risk
 
 Exact first logical task:
 
-    Implement the minimal Phase 6 comparable selection and V1 valuation flow using
-    listing comparables, including comparable_sets/comparable_items/valuations
-    persistence, similarity scoring, adaptive radius, location/size/recency filters,
-    outlier handling, FMV low/base/high, valuation confidence, explanation, and
-    INSUFFICIENT_DATA.
+    Implement the minimal Phase 8 LLM seller-intelligence and risk foundation:
+    one small provider adapter, validated structured output/cache keyed by
+    semantic input hash/version, llm_analyses/risk_assessments/risk_flags
+    persistence, deterministic seller signals, PASS/VERIFY/BLOCK Risk Gate,
+    evidence preservation, UNKNOWN handling, manual/verified precedence, and
+    non-fatal LLM outage handling.
 
 Do not implement:
 
 - production transaction import;
-- liquidity analysis;
-- seller/risk intelligence;
-- LLM extraction;
 - opportunity scoring;
 - opportunity alerts;
+- deal engine or investment profile math;
 - additional markets or sources.
 
 ## Required Context
@@ -124,26 +137,28 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 6 - Comparable Engine & V1 Valuation
+    -> PHASE 8 - LLM Seller Intelligence & Risk
 
 Relevant specification sections only:
 
     docs/03-data-model.md
-    -> comparable_sets
-    -> comparable_items
-    -> valuations
+    -> llm_analyses
+    -> risk_assessments
+    -> risk_flags
+    -> provenance/manual precedence
 
     docs/05-analysis-specification.md
-    -> Comparable Engine
-    -> Comparable Similarity
-    -> Outliers
-    -> Fair Market Value
-    -> Valuation Confidence
-    -> Valuation Failure
-    -> Explainability
+    -> LLM Analysis
+    -> Seller Motivation
+    -> Negotiability
+    -> Risk Engine
+    -> Hard/Soft Risks
+    -> Risk Conflict Resolution
+    -> Seller Explanation
+    -> Risk Explanation
 
     docs/08-testing-specification.md
-    -> comparable/valuation tests relevant to Phase 6
+    -> Phase 8 seller-intelligence and risk tests
 
 Existing implementation to inspect:
 
@@ -152,27 +167,28 @@ Existing implementation to inspect:
     backend/alembic/
     backend/app/features/
     backend/app/locations/
+    backend/app/valuation/
     backend/app/ingestion/
     backend/app/matching/
     backend/tests/
 
-Do not load later-phase specifications unless a concrete Phase 6 dependency requires them.
+Do not load later-phase specifications unless a concrete Phase 8 dependency requires them.
 
-## Phase 6 Completion Gate
+## Phase 8 Completion Gate
 
-Phase 6 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
+Phase 8 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
 
-At minimum verify that a relevant property can reproducibly produce:
+At minimum verify representative listings show that:
 
-- market-reasonable listing comparables;
-- no mixing of listing comps with transaction comps;
-- explainable outlier handling;
-- FMV low/base/high;
-- valuation confidence that reacts to input quality;
-- INSUFFICIENT_DATA instead of false FMV;
-- enough comparable references to reconstruct WHY.
+- structured schema validation works;
+- `UNKNOWN` is preserved;
+- evidence is stored;
+- invalid/hallucinated output does not become domain truth;
+- seller motivation is not Risk Gate;
+- verified/manual precedence works;
+- LLM outage is non-fatal to ingestion and the rest of the pipeline.
 
-Before Phase 7, manually review a representative sample of valuations. If valuations are poor, improve location, effective data, comps, data quality, or valuation before building downstream opportunity logic.
+Do not build a multi-provider LLM platform unless the Phase 8 specification is changed.
 
 ## Update Rules
 

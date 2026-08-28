@@ -94,3 +94,28 @@ class MatchCandidateStatus(StrEnum):
     ACCEPTED = "ACCEPTED"
     REJECTED = "REJECTED"
     EXPIRED = "EXPIRED"
+
+
+class ComparableType(StrEnum):
+    TRANSACTION = "TRANSACTION"
+    LISTING = "LISTING"
+    PROPERTY_HISTORY = "PROPERTY_HISTORY"
+
+
+class ValuationStatus(StrEnum):
+    SUCCESS = "SUCCESS"
+    INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+
+
+class ValuationModelType(StrEnum):
+    LISTING_COMPS = "LISTING_COMPS"
+
+
+class LiquidityStatus(StrEnum):
+    SUCCESS = "SUCCESS"
+    INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+
+
+class FastSaleStatus(StrEnum):
+    SUCCESS = "SUCCESS"
+    INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
