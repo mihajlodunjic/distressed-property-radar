@@ -8,11 +8,11 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 8 - LLM Seller Intelligence & Risk
-    Current task: Phase 8 - implement minimal LLM seller intelligence and risk engine
+    Current phase: PHASE 9 - Deal Engine & Investment Profiles
+    Current task: Phase 9 - implement deterministic deal engine and investment profiles
     Task state: READY
 
-Phase 7 is complete.
+Phase 8 is complete.
 
 ## Completed Phases
 
@@ -24,10 +24,11 @@ Phase 7 is complete.
     PHASE 5 - Location, Features & Market Dataset: COMPLETED
     PHASE 6 - Comparable Engine & V1 Valuation: COMPLETED
     PHASE 7 - Liquidity & Fast-Sale Analysis: COMPLETED
+    PHASE 8 - LLM Seller Intelligence & Risk: COMPLETED
 
 ## Completed Tasks
 
-- Phase 7 rules-based liquidity assessment, liquidity confidence, Fast-Sale Value, target-day behavior, insufficient-data handling, versioning, persistence, and explainability are implemented and verified.
+- Phase 8 LLM structured extraction, semantic input caching, seller intelligence, risk gate, hard/soft risk flags, manual precedence, evidence preservation, UNKNOWN handling, outage handling, persistence, and tests are implemented and verified.
 
 ## Current Implementation Facts
 
@@ -35,9 +36,9 @@ Phase 7 is complete.
 - Backend configuration: centralized settings in `backend/app/core/config.py`, loaded from environment variables and optional root `.env`.
 - Backend logging: basic startup logging exists and does not log secrets.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
-- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, and `FastSaleStatus` exist in `backend/app/domain/enums.py`.
-- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, and `JobRun` exist in `backend/app/db/models.py`.
-- Migrations: Alembic is configured; current head is `0008_liquidity_fast_sale`.
+- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, and `RiskGateEffect` exist in `backend/app/domain/enums.py`.
+- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, and `JobRun` exist in `backend/app/db/models.py`.
+- Migrations: Alembic is configured; current head is `0009_llm_seller_risk`.
 - Bootstrap sources: migrations seed stable `manual` and `four_zida` sources with `source_runtime_state` rows.
 - Critical listing invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
 - `listing_raw_records` stores deduped CARD/DETAIL raw payloads by listing, record type, and content hash.
@@ -82,8 +83,14 @@ Phase 7 is complete.
 - Fast-sale estimates are persisted separately from FMV, link to the valuation and liquidity assessment inputs, carry target-day context, and keep `target_probability` null.
 - Fast-Sale V1 derives low/base/high from Phase 6 FMV, liquidity level, valuation confidence, valuation dispersion, and target horizon; it does not use LLM financial math or probabilistic sale timing.
 - Insufficient Phase 6 valuation input creates explicit `INSUFFICIENT_DATA` liquidity/fast-sale rows without fabricated liquidity scores or fast-sale values.
+- LLM analysis module: `backend/app/intelligence/llm_analysis.py` implements a small HTTP JSON provider adapter, `seller_risk_prompt_v1`, schema validation, semantic input hashing, successful-result caching, evidence capture, invalid-output rows, and non-fatal provider failure rows.
+- Seller/risk module: `backend/app/intelligence/seller_risk.py` implements `seller_intelligence_v1` and `risk_rules_v1`.
+- `llm_analyses` persists structured LLM outputs by listing, input hash, prompt version, provider, and model; LLM values remain claims and do not overwrite property facts.
+- `seller_assessments` persists effective seller motivation, negotiability, cash preference, reason for sale, confidence, source evidence, model version, and manual-precedence explanations.
+- `risk_assessments` and `risk_flags` persist PASS/VERIFY/BLOCK gate results, hard/soft flags, provenance, confidence, evidence, and rules version.
+- Phase 8 risk logic keeps seller motivation separate from the Risk Gate; verified/manual risk input can suppress weaker scraped/derived/LLM claims without deleting historical source rows.
 - Parser fixtures exist under `backend/tests/fixtures/four_zida` and do not depend on live portal state.
-- Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, zero-result anomaly safety, Phase 4 duplicate matching, ambiguous candidates, non-matches, manual precedence, rejected candidate behavior, idempotent matching, Phase 5 location normalization, historical feature calculation, market age/relist distinction, effective values, Data Quality V1, missing critical fields, recalculation, Phase 6 comparable filtering/ranking, listing/transaction distinction, outliers, valuation, confidence behavior, insufficient data, historical `as_of` protection, Phase 7 liquidity rules, UNKNOWN behavior, Fast-Sale Value ordering, target-day behavior, and versioned persistence.
+- Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, zero-result anomaly safety, Phase 4 duplicate matching, ambiguous candidates, non-matches, manual precedence, rejected candidate behavior, idempotent matching, Phase 5 location normalization, historical feature calculation, market age/relist distinction, effective values, Data Quality V1, missing critical fields, recalculation, Phase 6 comparable filtering/ranking, listing/transaction distinction, outliers, valuation, confidence behavior, insufficient data, historical `as_of` protection, Phase 7 liquidity rules, UNKNOWN behavior, Fast-Sale Value ordering, target-day behavior, versioned persistence, Phase 8 LLM schema validation, UNKNOWN preservation, cache behavior, provider outage behavior, deterministic seller signals, manual seller/risk precedence, Risk Gate behavior, soft risks, and evidence persistence.
 - Health endpoint: `GET /health` checks application process, PostgreSQL connectivity, and PostGIS availability.
 - Frontend: minimal Vite React shell exists under `frontend`.
 - `.env.example` documents required variable names with local-only example values and no real secrets.
@@ -109,23 +116,27 @@ Phase 7 is complete.
 
 Implement only:
 
-    PHASE 8 - LLM Seller Intelligence & Risk
+    PHASE 9 - Deal Engine & Investment Profiles
 
 Exact first logical task:
 
-    Implement the minimal Phase 8 LLM seller-intelligence and risk foundation:
-    one small provider adapter, validated structured output/cache keyed by
-    semantic input hash/version, llm_analyses/risk_assessments/risk_flags
-    persistence, deterministic seller signals, PASS/VERIFY/BLOCK Risk Gate,
-    evidence preservation, UNKNOWN handling, manual/verified precedence, and
-    non-fatal LLM outage handling.
+    Implement the minimal Phase 9 deterministic deal engine and investment
+    profile foundation: cost_profiles, investment_profiles, deal_analyses,
+    and deal_scenarios persistence; Decimal-only Total Cost Basis, Net Profit,
+    ROI, Annualized ROI, Capital Days, Profit / Capital-Day, Max Buy, and
+    Required Negotiation calculations; DOWNSIDE/BASE/UPSIDE scenarios; and
+    tests for fixed costs, percentage costs, zero/negative margin, Max Buy,
+    required negotiation, ROI, annualized ROI, scenario differences, invalid
+    inputs, and Decimal precision.
 
 Do not implement:
 
-- production transaction import;
 - opportunity scoring;
 - opportunity alerts;
-- deal engine or investment profile math;
+- Telegram alerts;
+- action queue or ranking;
+- frontend deal/opportunity UI beyond what Phase 9 explicitly requires;
+- LLM-based financial calculations;
 - additional markets or sources.
 
 ## Required Context
@@ -137,58 +148,67 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 8 - LLM Seller Intelligence & Risk
+    -> PHASE 9 - Deal Engine & Investment Profiles
 
 Relevant specification sections only:
 
     docs/03-data-model.md
-    -> llm_analyses
-    -> risk_assessments
-    -> risk_flags
-    -> provenance/manual precedence
+    -> cost_profiles
+    -> investment_profiles
+    -> deal_analyses
+    -> deal_scenarios
 
     docs/05-analysis-specification.md
-    -> LLM Analysis
-    -> Seller Motivation
-    -> Negotiability
-    -> Risk Engine
-    -> Hard/Soft Risks
-    -> Risk Conflict Resolution
-    -> Seller Explanation
-    -> Risk Explanation
+    -> Deal Engine
+    -> Cost Profiles
+    -> Total Cost Basis
+    -> Net Profit
+    -> ROI
+    -> Capital Days
+    -> Risk Reserve
+    -> Max Buy Price
+    -> Required Negotiation
+    -> Deal Scenarios
 
     docs/08-testing-specification.md
-    -> Phase 8 seller-intelligence and risk tests
+    -> Deal Engine
+    -> Fixed-Cost Deal
+    -> Percentage Costs
+    -> Max Buy Solver
+    -> Max Buy Monotonicity
+    -> Required Negotiation
+    -> Scenario Ordering
+    -> Invalid Deal Input
+    -> Annualized ROI
+    -> Phase 9
 
 Existing implementation to inspect:
 
     backend/app/domain/enums.py
     backend/app/db/models.py
     backend/alembic/
-    backend/app/features/
-    backend/app/locations/
     backend/app/valuation/
-    backend/app/ingestion/
-    backend/app/matching/
+    backend/app/liquidity/
+    backend/app/intelligence/
     backend/tests/
 
-Do not load later-phase specifications unless a concrete Phase 8 dependency requires them.
+Do not load later-phase specifications unless a concrete Phase 9 dependency requires them.
 
-## Phase 8 Completion Gate
+## Phase 9 Completion Gate
 
-Phase 8 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
+Phase 9 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
 
-At minimum verify representative listings show that:
+At minimum verify:
 
-- structured schema validation works;
-- `UNKNOWN` is preserved;
-- evidence is stored;
-- invalid/hallucinated output does not become domain truth;
-- seller motivation is not Risk Gate;
-- verified/manual precedence works;
-- LLM outage is non-fatal to ingestion and the rest of the pipeline.
+- fixed and percentage costs;
+- Total Cost Basis, Net Profit, ROI, Annualized ROI, Capital Days, Profit / Capital-Day;
+- Max Buy when costs depend on purchase price;
+- Required Negotiation never goes negative;
+- DOWNSIDE/BASE/UPSIDE scenario behavior;
+- zero/negative margin and invalid input handling;
+- Decimal precision.
 
-Do not build a multi-provider LLM platform unless the Phase 8 specification is changed.
+Do not implement Phase 10 opportunity scoring or alerts.
 
 ## Update Rules
 

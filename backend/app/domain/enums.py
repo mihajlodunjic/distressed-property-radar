@@ -119,3 +119,52 @@ class LiquidityStatus(StrEnum):
 class FastSaleStatus(StrEnum):
     SUCCESS = "SUCCESS"
     INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+
+
+class AnalysisLevel(StrEnum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    UNKNOWN = "UNKNOWN"
+
+
+class ReasonForSale(StrEnum):
+    MOVING = "MOVING"
+    MOVING_ABROAD = "MOVING_ABROAD"
+    NEEDS_LIQUIDITY = "NEEDS_LIQUIDITY"
+    INHERITANCE = "INHERITANCE"
+    DIVORCE = "DIVORCE"
+    BUSINESS_LIQUIDITY = "BUSINESS_LIQUIDITY"
+    BOUGHT_ANOTHER_PROPERTY = "BOUGHT_ANOTHER_PROPERTY"
+    VACANT_PROPERTY = "VACANT_PROPERTY"
+    INVESTOR_EXIT = "INVESTOR_EXIT"
+    TIME_DEADLINE = "TIME_DEADLINE"
+    OTHER = "OTHER"
+    UNKNOWN = "UNKNOWN"
+
+
+class LlmAnalysisStatus(StrEnum):
+    PENDING = "PENDING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    INVALID_OUTPUT = "INVALID_OUTPUT"
+
+
+class RiskGateStatus(StrEnum):
+    PASS = "PASS"
+    VERIFY = "VERIFY"
+    BLOCK = "BLOCK"
+
+
+class RiskSeverity(StrEnum):
+    INFO = "INFO"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class RiskGateEffect(StrEnum):
+    NONE = "NONE"
+    VERIFY = "VERIFY"
+    BLOCK = "BLOCK"

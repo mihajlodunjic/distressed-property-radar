@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.domain.enums import (
+    AnalysisLevel,
     ComparableType,
     CurrencyCode,
     DataSourceKind,
@@ -29,10 +30,15 @@ from app.domain.enums import (
     ListingEventType,
     ListingRawRecordType,
     ListingStatus,
+    LlmAnalysisStatus,
     MatchCandidateStatus,
     MatchDecision,
     PropertyPipelineStatus,
     PropertyType,
+    ReasonForSale,
+    RiskGateEffect,
+    RiskGateStatus,
+    RiskSeverity,
     SellerType,
     SourceHealthStatus,
     ValuationModelType,
@@ -212,6 +218,15 @@ class Property(Base):
         back_populates="property",
         cascade="all, delete-orphan",
     )
+    llm_analyses: Mapped[list[LlmAnalysis]] = relationship(back_populates="property")
+    seller_assessments: Mapped[list[SellerAssessment]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    risk_assessments: Mapped[list[RiskAssessment]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
 
 
 class Listing(Base):
@@ -319,6 +334,10 @@ class Listing(Base):
         cascade="all, delete-orphan",
     )
     comparable_items: Mapped[list[ComparableItem]] = relationship(back_populates="listing")
+    llm_analyses: Mapped[list[LlmAnalysis]] = relationship(
+        back_populates="listing",
+        cascade="all, delete-orphan",
+    )
 
 
 class ListingEvent(Base):
@@ -764,6 +783,163 @@ class FastSaleEstimate(Base):
     liquidity_assessment: Mapped[LiquidityAssessment | None] = relationship(
         back_populates="fast_sale_estimates",
     )
+
+
+class LlmAnalysis(Base):
+    __tablename__ = "llm_analyses"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    listing_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("listings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    property_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="SET NULL"),
+    )
+    input_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[LlmAnalysisStatus] = mapped_column(
+        _enum_column(LlmAnalysisStatus, 32),
+        nullable=False,
+    )
+    seller_motivation_level: Mapped[AnalysisLevel | None] = mapped_column(
+        _enum_column(AnalysisLevel, 16),
+    )
+    seller_motivation_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    cash_preferred: Mapped[bool | None] = mapped_column(Boolean)
+    cash_preference_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    negotiability_level: Mapped[AnalysisLevel | None] = mapped_column(
+        _enum_column(AnalysisLevel, 16)
+    )
+    negotiability_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    reason_for_sale: Mapped[ReasonForSale | None] = mapped_column(
+        _enum_column(ReasonForSale, 40),
+    )
+    reason_for_sale_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    condition_category: Mapped[str | None] = mapped_column(String(100))
+    condition_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    structured_output_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    evidence_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    listing: Mapped[Listing] = relationship(back_populates="llm_analyses")
+    property: Mapped[Property | None] = relationship(back_populates="llm_analyses")
+    seller_assessments: Mapped[list[SellerAssessment]] = relationship(
+        back_populates="primary_llm_analysis",
+    )
+
+
+class SellerAssessment(Base):
+    __tablename__ = "seller_assessments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    primary_llm_analysis_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("llm_analyses.id", ondelete="SET NULL"),
+    )
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    seller_motivation_level: Mapped[AnalysisLevel] = mapped_column(
+        _enum_column(AnalysisLevel, 16),
+        nullable=False,
+    )
+    seller_motivation_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    seller_motivation_confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    negotiability_level: Mapped[AnalysisLevel] = mapped_column(
+        _enum_column(AnalysisLevel, 16),
+        nullable=False,
+    )
+    negotiability_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    negotiability_confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    cash_preferred: Mapped[bool | None] = mapped_column(Boolean)
+    cash_preference_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    reason_for_sale: Mapped[ReasonForSale] = mapped_column(
+        _enum_column(ReasonForSale, 40),
+        nullable=False,
+    )
+    evidence_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    model_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="seller_assessments")
+    primary_llm_analysis: Mapped[LlmAnalysis | None] = relationship(
+        back_populates="seller_assessments",
+    )
+
+
+class RiskAssessment(Base):
+    __tablename__ = "risk_assessments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    hard_gate_status: Mapped[RiskGateStatus] = mapped_column(
+        _enum_column(RiskGateStatus, 16),
+        nullable=False,
+    )
+    risk_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    rules_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="risk_assessments")
+    flags: Mapped[list[RiskFlag]] = relationship(
+        back_populates="risk_assessment",
+        cascade="all, delete-orphan",
+    )
+
+
+class RiskFlag(Base):
+    __tablename__ = "risk_flags"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    risk_assessment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("risk_assessments.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    code: Mapped[str] = mapped_column(String(100), nullable=False)
+    severity: Mapped[RiskSeverity] = mapped_column(_enum_column(RiskSeverity, 16), nullable=False)
+    gate_effect: Mapped[RiskGateEffect] = mapped_column(
+        _enum_column(RiskGateEffect, 16),
+        nullable=False,
+    )
+    source_kind: Mapped[DataSourceKind] = mapped_column(
+        _enum_column(DataSourceKind, 32),
+        nullable=False,
+    )
+    source_reference: Mapped[str | None] = mapped_column(String(255))
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+
+    risk_assessment: Mapped[RiskAssessment] = relationship(back_populates="flags")
 
 
 class JobRun(Base):
