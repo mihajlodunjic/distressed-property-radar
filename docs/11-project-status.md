@@ -8,11 +8,11 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 12 - Watchlist, Reanalysis & Change Intelligence
-    Current task: Phase 12 - implement watchlist, watch rules, change intelligence, selective reanalysis, and action upgrades
+    Current phase: PHASE 13 - Acquisition CRM & Human Feedback
+    Current task: Phase 13 - implement acquisition workflow persistence, commands, API/UI, and manual-feedback reanalysis
     Task state: READY
 
-Phase 11 is complete.
+Phase 12 is complete.
 
 ## Completed Phases
 
@@ -28,10 +28,11 @@ Phase 11 is complete.
     PHASE 9 - Deal Engine & Investment Profiles: COMPLETED
     PHASE 10 - Opportunity Engine & Telegram Alerts: COMPLETED
     PHASE 11 - First Usable Dashboard: COMPLETED
+    PHASE 12 - Watchlist, Reanalysis & Change Intelligence: COMPLETED
 
 ## Completed Tasks
 
-- Phase 11 private V0 dashboard/API is implemented and verified: Action Queue, Properties List, Property Detail, Source Health, Basic Settings, loading/empty/error/auth/UNKNOWN/STALE/BLOCK states, and frontend/backend tests/checks.
+- Phase 12 watchlist/reanalysis/change intelligence is implemented and verified: watch rules, What Changed, selective stale-state invalidation, automatic downstream reanalysis, Watch-to-CALL action upgrade, Telegram alert decision on fresh deal analysis, API/UI integration, and backend/frontend tests/checks.
 
 ## Current Implementation Facts
 
@@ -39,9 +40,9 @@ Phase 11 is complete.
 - Backend configuration: centralized settings in `backend/app/core/config.py`, loaded from environment variables and optional root `.env`.
 - Backend logging: basic startup logging exists and does not log secrets.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
-- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, `RiskGateEffect`, `DealAnalysisStatus`, `DealScenarioType`, `OpportunityAction`, `AlertChannel`, `AlertType`, and `AlertStatus` exist in `backend/app/domain/enums.py`.
-- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, `CostProfile`, `InvestmentProfile`, `DealAnalysis`, `DealScenario`, `OpportunityAssessment`, `Alert`, and `JobRun` exist in `backend/app/db/models.py`.
-- Migrations: Alembic is configured; current head is `0011_opportunity_alerts`.
+- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, `RiskGateEffect`, `DealAnalysisStatus`, `DealScenarioType`, `OpportunityAction`, `AlertChannel`, `AlertType`, `AlertStatus`, `WatchRuleType`, and `AnalysisStatus` exist in `backend/app/domain/enums.py`.
+- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, `CostProfile`, `InvestmentProfile`, `DealAnalysis`, `DealScenario`, `OpportunityAssessment`, `Alert`, `PropertyAnalysisState`, `WatchRule`, `WatchTriggerEvent`, and `JobRun` exist in `backend/app/db/models.py`.
+- Migrations: Alembic is configured; current head is `0012_watchlist_reanalysis`.
 - Bootstrap sources: migrations seed stable `manual` and `four_zida` sources with `source_runtime_state` rows.
 - Critical listing invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
 - `listing_raw_records` stores deduped CARD/DETAIL raw payloads by listing, record type, and content hash.
@@ -108,21 +109,30 @@ Phase 11 is complete.
 - Alert dedupe uses property, recommended action, and semantic opportunity `state_hash`; unchanged opportunity states do not create duplicate logical alerts.
 - Telegram delivery is implemented behind `backend/app/opportunities/telegram.py`; automated tests use fake providers, not the real Telegram API.
 - Only `CALL` and `URGENT_CALL` opportunity actions are Telegram alert-eligible in Phase 10.
-- Dashboard API: `backend/app/api/dashboard.py` exposes read-only `GET /api/v1/action-queue`, `GET /api/v1/properties`, `GET /api/v1/properties/{id}`, `GET /api/v1/properties/{id}/history`, `GET /api/v1/sources`, and `GET /api/v1/settings`.
+- Analysis state: `backend/app/analysis/state.py` maintains current per-module operational statuses without overwriting historical analytical rows.
+- Watchlist module: `backend/app/watchlist/watchlist_service.py` implements `watch_reanalysis_v1`, active watch rules, trigger dedupe, What Changed records, selective invalidation, and automatic downstream reanalysis for `ANY_PRICE_CHANGE`, `PRICE_BELOW`, `PRICE_DROP_PERCENT`, `DESCRIPTION_CHANGE`, and `SELLER_CHANGE`.
+- Price changes invalidate and refresh only deal/opportunity for watched trigger handling; valuation/liquidity/fast-sale remain fresh when the current valuation model does not use target asking price.
+- Description changes invalidate LLM/seller/risk/deal/opportunity; current implementation refreshes deterministic seller/risk/deal/opportunity and leaves `llm` visibly `STALE` until a real LLM run is performed.
+- Seller changes invalidate and refresh seller/risk/deal/opportunity.
+- Watch trigger history is persisted in `watch_trigger_events`; repeated evaluation of the same unchanged listing event does not create duplicate trigger rows, reanalysis rows, or alerts.
+- 4zida ingestion now emits `DESCRIPTION_CHANGED` and `SELLER_CHANGED` listing events when already-normalized fields change and passes created listing events through watch evaluation.
+- Dashboard API: `backend/app/api/dashboard.py` exposes `GET /api/v1/action-queue`, `GET /api/v1/properties`, `GET /api/v1/properties/{id}`, `GET /api/v1/properties/{id}/history`, `GET /api/v1/watchlist`, `POST /api/v1/properties/{id}/watch`, `DELETE /api/v1/properties/{id}/watch`, `POST /api/v1/properties/{id}/reanalyze`, `GET /api/v1/sources`, and `GET /api/v1/settings`.
 - API access: `backend/app/api/dependencies.py` provides DB-session dependency and a single-user bearer-token guard. If `API_ACCESS_TOKEN` is configured it is required; production fails closed when the token is missing. Local development/test can run without a token.
-- API routing/CORS: `backend/app/main.py` registers `/api/v1/health`, the dashboard router, and non-wildcard CORS origins from `CORS_ALLOWED_ORIGINS`.
+- API routing/CORS: `backend/app/main.py` registers `/api/v1/health`, the dashboard router, non-wildcard CORS origins from `CORS_ALLOWED_ORIGINS`, and CORS methods required by the current dashboard writes.
 - Action Queue API uses backend opportunity/deal/valuation/liquidity/risk read models, excludes `IGNORE` by default, returns summary counts, source warnings, pagination, whitelist sorting/filtering, and preserves `null` as UNKNOWN.
-- Property Detail API returns decision header, listings, listing history, comparables, valuation, liquidity/fast-sale, seller, risk flags, deal economics/scenarios/costs, and freshness/statuses. Stale display state is derived from listing inputs newer than current analysis `as_of`; historical rows are not overwritten.
+- Property Detail API returns decision header, listings, listing history, Watch/What Changed data, comparables, valuation, liquidity/fast-sale, seller, risk flags, deal economics/scenarios/costs, and freshness/statuses. When `property_analysis_state` exists it drives selective current statuses; otherwise stale display falls back to listing inputs newer than analysis `as_of`. Historical rows are not overwritten.
 - Source Health API returns one row per source with runtime state, latest job summary, recent errors, parse health, enabled state, and dashboard warnings.
 - Settings API is read-only and reports investment/cost profile summaries, notification/configuration booleans, CORS origins, and source counts without exposing secret values.
-- Frontend dashboard: `frontend/src/App.tsx` implements Action Queue, Properties, Property Detail, Source Health, and Settings routes against the implemented `/api/v1` contracts.
+- Frontend dashboard: `frontend/src/App.tsx` implements Action Queue, Properties, Watchlist, Property Detail, Source Health, and Settings routes against the implemented `/api/v1` contracts.
+- Property Detail UI includes Watch/Unwatch/Reanalyze commands and a What Changed section backed by `watch_trigger_events`.
 - Frontend API client stores the optional private API token in session storage and never hardcodes a token in source.
 - Frontend status/format helpers preserve UNKNOWN instead of converting it to zero/false/empty display values and render STALE/FAILED/BLOCK as explicit text statuses.
 - Parser fixtures exist under `backend/tests/fixtures/four_zida` and do not depend on live portal state.
 - Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, zero-result anomaly safety, Phase 4 duplicate matching, ambiguous candidates, non-matches, manual precedence, rejected candidate behavior, idempotent matching, Phase 5 location normalization, historical feature calculation, market age/relist distinction, effective values, Data Quality V1, missing critical fields, recalculation, Phase 6 comparable filtering/ranking, listing/transaction distinction, outliers, valuation, confidence behavior, insufficient data, historical `as_of` protection, Phase 7 liquidity rules, UNKNOWN behavior, Fast-Sale Value ordering, target-day behavior, versioned persistence, Phase 8 LLM schema validation, UNKNOWN preservation, cache behavior, provider outage behavior, deterministic seller signals, manual seller/risk precedence, Risk Gate behavior, soft risks, evidence persistence, Phase 9 fixed/percentage costs, sale costs, total cost basis, net proceeds, profit, ROI, annualized ROI, risk reserve, Max Buy, required negotiation, scenario calculations, invalid inputs, Decimal precision, and versioned persistence.
 - Backend tests also cover Phase 10 action classification, hard gates, confidence/downside thresholds, reason codes, ranking, full opportunity-to-notification flow, alert lifecycle, retry, dedupe, action upgrade, and operational/opportunity alert separation.
 - Backend tests also cover Phase 11 private API auth, Action Queue contract, empty queue, no obvious Action Queue N+1 query pattern, Property Detail UNKNOWN/STALE/BLOCK/history/analysis sections, Source Health, Settings secrecy, and `/api/v1/health`.
-- Frontend tests cover UNKNOWN rendering and critical status formatting for STALE/FAILED/BLOCK. Frontend build/typecheck is configured through `npm run build`; no separate frontend lint script exists.
+- Backend tests also cover Phase 12 watch-rule persistence/API, Watchlist API, trigger dedupe, selective price/description/seller invalidation, historical reanalysis preservation, Watch-to-CALL upgrade, fresh deal-based Telegram alert decisions, and manual reanalysis queue response.
+- Frontend tests cover UNKNOWN rendering, critical status formatting for STALE/FAILED/BLOCK, and watch-trigger formatting. Frontend build/typecheck is configured through `npm run build`; no separate frontend lint script exists.
 - Health endpoints: `GET /health` and `GET /api/v1/health` check application process, PostgreSQL connectivity, and PostGIS availability.
 - Frontend: Vite React dashboard exists under `frontend`.
 - `.env.example` documents required variable names with local-only example values and no real secrets, including empty `API_ACCESS_TOKEN`, `LLM_API_KEY`, Telegram token/chat values, and configured CORS origin names.
@@ -148,20 +158,21 @@ Phase 11 is complete.
 
 Implement only:
 
-    PHASE 12 - Watchlist, Reanalysis & Change Intelligence
+    PHASE 13 - Acquisition CRM & Human Feedback
 
 Exact first logical task:
 
-    Implement watchlist persistence and API/UI actions for WATCH properties,
-    including watch rules and What Changed output, so triggered listing changes
-    run selective reanalysis before opportunity/action-alert decisions.
+    Implement acquisition workflow persistence and backend application commands
+    for review, call/visit feedback, offers, skip records, manual estimates,
+    notes, and pipeline status transitions, preserving manual precedence and
+    triggering selective downstream reanalysis where Phase 13 requires it.
 
 Do not implement:
 
-- Phase 13 acquisition CRM/human feedback;
-- generic CRM or kanban workflow;
+- Phase 14 reliability, monitoring, or production-hardening work;
+- generic CRM or kanban workflow beyond acquisition-specific Phase 13 scope;
 - portfolio/transaction import;
-- multi-channel notification infrastructure beyond existing Telegram alerts;
+- multi-channel notification infrastructure beyond existing Telegram alerts unless Phase 13 explicitly requires it;
 - additional markets or sources.
 
 ## Required Context
@@ -173,32 +184,43 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 12 - Watchlist, Reanalysis & Change Intelligence
+    -> PHASE 13 - Acquisition CRM & Human Feedback
 
 Relevant specification sections only:
 
     docs/03-data-model.md
-    -> watch_rules
-    -> analytical current/stale state
+    -> property_reviews
+    -> interactions
+    -> call_feedback
+    -> visit_feedback
+    -> offers
+    -> skip_records
+    -> property_outcomes
+    -> property_overrides
+    -> manual precedence
 
     docs/05-analysis-specification.md
-    -> Re-analysis
-    -> invalidation rules
-    -> Watch Threshold Crossing
+    -> manual precedence
+    -> seller feedback
+    -> risk/deal re-analysis
 
     docs/06-api-ui-specification.md
-    -> Watch
-    -> Watchlist
-    -> What Changed
-    -> Reanalysis API
+    -> Pipeline
+    -> Log Call
+    -> Log Visit
+    -> Offers
+    -> Skip
+    -> related APIs
 
     docs/08-testing-specification.md
-    -> Phase 12 watch trigger/reanalysis tests
+    -> Phase 13 acquisition workflow/manual feedback tests
 
 Existing implementation to inspect:
 
     backend/app/api/
     backend/app/db/models.py
+    backend/app/analysis/
+    backend/app/watchlist/
     backend/app/opportunities/
     backend/app/deals/
     backend/app/valuation/
@@ -209,21 +231,21 @@ Existing implementation to inspect:
     frontend/
     backend/tests/
 
-Do not load Phase 13+ specifications unless a concrete Phase 12 dependency requires them.
+Do not load Phase 14+ specifications unless a concrete Phase 13 dependency requires them.
 
-## Phase 12 Completion Gate
+## Phase 13 Completion Gate
 
-Phase 12 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
+Phase 13 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
 
 At minimum verify:
 
-- a WATCH property can have a watch rule;
-- a relevant listing change triggers current selective reanalysis;
-- What Changed output explains the trigger;
-- a WATCH property can upgrade to CALL after reanalysis;
-- Telegram alert decision uses fresh analysis and does not use stale deal results.
+- acquisition-specific workflow records are persisted with history;
+- pipeline transitions, reviews, call/visit feedback, offers, skips, manual estimates, and notes work through backend commands/API/UI;
+- manual inputs preserve canonical precedence and do not overwrite historical automatic analysis;
+- relevant manual feedback selectively invalidates or refreshes downstream analysis;
+- skip behavior is atomic and auditable.
 
-Do not implement Phase 13 acquisition CRM/human feedback behavior.
+Do not implement Phase 14 reliability/monitoring/production-hardening behavior.
 
 ## Update Rules
 

@@ -3,13 +3,22 @@ import "./App.css";
 import type { FormEvent, ReactElement, ReactNode } from "react";
 import { useEffect, useState } from "react";
 
-import { ApiError, HEALTH_URL, apiGet, clearAccessToken, setAccessToken } from "./api";
+import {
+  ApiError,
+  HEALTH_URL,
+  apiDelete,
+  apiGet,
+  apiPost,
+  clearAccessToken,
+  setAccessToken,
+} from "./api";
 import {
   displayBoolean,
   displayDateTime,
   displayMoney,
   displayPercent,
   displayValue,
+  displayWatchTrigger,
   statusTone,
 } from "./format";
 import type {
@@ -21,6 +30,8 @@ import type {
   SettingsResponse,
   SourceWarning,
   SourcesResponse,
+  WatchlistItem,
+  WatchlistResponse,
 } from "./types";
 
 type ResourceState<T> =
@@ -42,6 +53,14 @@ type Route = {
 };
 
 const actionOrder = ["URGENT_CALL", "CALL", "REVIEW", "WATCH"];
+const watchRuleTypes = [
+  "",
+  "ANY_PRICE_CHANGE",
+  "PRICE_BELOW",
+  "PRICE_DROP_PERCENT",
+  "DESCRIPTION_CHANGE",
+  "SELLER_CHANGE",
+];
 
 function useApiResource<T>(path: string, accessRevision: number) {
   const [reloadRevision, setReloadRevision] = useState(0);
@@ -450,6 +469,95 @@ function PropertyListRow({ item }: { item: PropertyListItem }) {
   );
 }
 
+function WatchlistPage({ accessRevision, onAccessSaved }: PageProps) {
+  const { state, reload } = useApiResource<WatchlistResponse>(
+    "/api/v1/watchlist",
+    accessRevision,
+  );
+
+  return (
+    <ResourceView state={state} onAccessSaved={onAccessSaved} onRetry={reload}>
+      {(data) => (
+        <Section title="Watchlist">
+          {data.items.length === 0 ? (
+            <Notice title="No watched properties." />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Location</th>
+                    <th>Property</th>
+                    <th>Asking</th>
+                    <th>Max Buy</th>
+                    <th>Gap</th>
+                    <th>Last Price Cut</th>
+                    <th>Market Age</th>
+                    <th>Watch Trigger</th>
+                    <th>Last Change</th>
+                    <th>Action</th>
+                    <th>Listing</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((item) => (
+                    <WatchlistRow item={item} key={item.property_id} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+      )}
+    </ResourceView>
+  );
+}
+
+function WatchlistRow({ item }: { item: WatchlistItem }) {
+  return (
+    <tr>
+      <td>
+        <ValueText>{displayValue(item.location.label)}</ValueText>
+      </td>
+      <td>
+        <a href={`/properties/${item.property_id}`}>
+          <ValueText>{displayValue(item.property_label)}</ValueText>
+        </a>
+      </td>
+      <td>{displayMoney(item.asking_price, item.currency)}</td>
+      <td>{displayMoney(item.max_buy_price, item.currency)}</td>
+      <td>{displayMoney(item.gap_to_max_buy, item.currency)}</td>
+      <td>{displayDateTime(item.last_price_cut)}</td>
+      <td>
+        <ValueText>{displayValue(item.property_market_age_days)}</ValueText>
+      </td>
+      <td>
+        {displayWatchTrigger(
+          item.watch_rule?.rule_type,
+          item.watch_rule?.threshold_numeric,
+        )}
+      </td>
+      <td>
+        {displayDateTime(item.last_change)}
+        {item.last_change_summary ? (
+          <div className="subtle-line">
+            {displayValue(item.last_change_summary.summary_text)}
+          </div>
+        ) : null}
+      </td>
+      <td>
+        <div className="stack">
+          <StatusBadge status={item.recommended_action} />
+          <StatusBadge status={item.analysis_status} />
+        </div>
+      </td>
+      <td>
+        <ExternalListingLink url={item.current_listing.url} />
+      </td>
+    </tr>
+  );
+}
+
 function PropertyDetailPage({
   propertyId,
   accessRevision,
@@ -462,14 +570,81 @@ function PropertyDetailPage({
 
   return (
     <ResourceView state={state} onAccessSaved={onAccessSaved} onRetry={reload}>
-      {(detail) => <PropertyDetailContent detail={detail} />}
+      {(detail) => <PropertyDetailContent detail={detail} onReload={reload} />}
     </ResourceView>
   );
 }
 
-function PropertyDetailContent({ detail }: { detail: PropertyDetail }) {
+function PropertyDetailContent({
+  detail,
+  onReload,
+}: {
+  detail: PropertyDetail;
+  onReload: () => void;
+}) {
   const currency = detail.decision.currency;
   const riskGate = detail.decision.risk_gate;
+  const [watchRuleType, setWatchRuleType] = useState(
+    detail.watch.active_rule?.rule_type ?? "",
+  );
+  const [watchThreshold, setWatchThreshold] = useState(
+    detail.watch.active_rule?.threshold_numeric ?? "",
+  );
+  const [commandMessage, setCommandMessage] = useState<string | null>(null);
+  const [commandPending, setCommandPending] = useState(false);
+
+  useEffect(() => {
+    setWatchRuleType(detail.watch.active_rule?.rule_type ?? "");
+    setWatchThreshold(detail.watch.active_rule?.threshold_numeric ?? "");
+  }, [detail.watch.active_rule?.rule_type, detail.watch.active_rule?.threshold_numeric]);
+
+  async function submitWatch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCommandPending(true);
+    setCommandMessage(null);
+    try {
+      await apiPost(`/api/v1/properties/${detail.property.property_id}/watch`, {
+        rule_type: watchRuleType || null,
+        threshold_numeric: watchThreshold || null,
+      });
+      setCommandMessage("WATCHED");
+      onReload();
+    } catch (error) {
+      setCommandMessage(error instanceof Error ? error.message : "Watch request failed");
+    } finally {
+      setCommandPending(false);
+    }
+  }
+
+  async function unwatch() {
+    setCommandPending(true);
+    setCommandMessage(null);
+    try {
+      await apiDelete(`/api/v1/properties/${detail.property.property_id}/watch`);
+      setCommandMessage("UNWATCHED");
+      onReload();
+    } catch (error) {
+      setCommandMessage(error instanceof Error ? error.message : "Unwatch request failed");
+    } finally {
+      setCommandPending(false);
+    }
+  }
+
+  async function reanalyze() {
+    setCommandPending(true);
+    setCommandMessage(null);
+    try {
+      const response = await apiPost<{ status: string }>(
+        `/api/v1/properties/${detail.property.property_id}/reanalyze`,
+      );
+      setCommandMessage(response.status);
+      onReload();
+    } catch (error) {
+      setCommandMessage(error instanceof Error ? error.message : "Reanalysis request failed");
+    } finally {
+      setCommandPending(false);
+    }
+  }
 
   return (
     <>
@@ -533,6 +708,85 @@ function PropertyDetailContent({ detail }: { detail: PropertyDetail }) {
           <span>Last Listing Update: {displayDateTime(detail.freshness.last_listing_update)}</span>
           <span>Last Analysis: {displayDateTime(detail.freshness.last_analysis)}</span>
         </div>
+      </Section>
+
+      <Section
+        title="Watch"
+        eyebrow={
+          <StatusBadge status={detail.watch.is_watched ? "WATCH" : "NOT_WATCHED"} />
+        }
+      >
+        <form className="watch-form" onSubmit={submitWatch}>
+          <label className="watch-field" htmlFor="watch-rule">
+            <span>Watch Trigger</span>
+            <select
+              id="watch-rule"
+              onChange={(event) => setWatchRuleType(event.target.value)}
+              value={watchRuleType}
+            >
+              {watchRuleTypes.map((ruleType) => (
+                <option key={ruleType || "DEFAULT"} value={ruleType}>
+                  {ruleType || "DEFAULT_RELEVANT_CHANGE"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="watch-field" htmlFor="watch-threshold">
+            <span>Threshold</span>
+            <input
+              id="watch-threshold"
+              inputMode="decimal"
+              onChange={(event) => setWatchThreshold(event.target.value)}
+              placeholder="UNKNOWN"
+              value={watchThreshold}
+            />
+          </label>
+          <div className="watch-actions">
+            <button disabled={commandPending} type="submit">
+              Watch
+            </button>
+            <button disabled={commandPending} onClick={unwatch} type="button">
+              Unwatch
+            </button>
+            <button disabled={commandPending} onClick={reanalyze} type="button">
+              Reanalyze
+            </button>
+          </div>
+        </form>
+        {commandMessage ? <StatusBadge status={commandMessage} /> : null}
+        <KeyValueGrid
+          rows={[
+            [
+              "Active Trigger",
+              displayWatchTrigger(
+                detail.watch.active_rule?.rule_type,
+                detail.watch.active_rule?.threshold_numeric,
+              ),
+            ],
+            [
+              "Last Evaluated",
+              displayDateTime(detail.watch.active_rule?.last_evaluated_at),
+            ],
+            ["Last Triggered", displayDateTime(detail.watch.active_rule?.triggered_at)],
+          ]}
+        />
+      </Section>
+
+      <Section title="What Changed">
+        {detail.watch.latest_changes.length === 0 ? (
+          <Notice title="No watch-triggered changes." />
+        ) : (
+          <DataTable
+            columns={["When", "Trigger", "Change", "Invalidated", "Reanalyzed"]}
+            rows={detail.watch.latest_changes.map((change) => [
+              displayDateTime(change.triggered_at),
+              displayWatchTrigger(change.trigger_type, null),
+              displayValue(change.summary.summary_text),
+              change.invalidated_modules.join(", ") || "UNKNOWN",
+              change.reanalyzed_modules.join(", ") || "UNKNOWN",
+            ])}
+          />
+        )}
       </Section>
 
       <Section title="Deal Summary" eyebrow={<StatusBadge status={detail.deal.status} />}>
@@ -932,6 +1186,14 @@ function currentRoute(props: PageProps): Route {
       element: <PropertiesPage {...props} />,
     };
   }
+  if (path === "/watchlist") {
+    return {
+      path,
+      activePath: "/watchlist",
+      label: "Watchlist",
+      element: <WatchlistPage {...props} />,
+    };
+  }
   if (path === "/sources") {
     return {
       path,
@@ -959,6 +1221,7 @@ function currentRoute(props: PageProps): Route {
 const navItems = [
   { path: "/", label: "Action Queue" },
   { path: "/properties", label: "Properties" },
+  { path: "/watchlist", label: "Watchlist" },
   { path: "/sources", label: "Sources" },
   { path: "/settings", label: "Settings" },
 ];

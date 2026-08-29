@@ -33,6 +33,33 @@ export type ListingSummary = {
   canonical_url?: string | null;
 };
 
+export type WatchRule = {
+  watch_rule_id: string;
+  property_id: string;
+  is_active: boolean;
+  rule_type: string | null;
+  threshold_numeric: string | null;
+  rule_config: Record<string, unknown>;
+  created_at: string | null;
+  triggered_at: string | null;
+  last_evaluated_at: string | null;
+};
+
+export type WatchTriggerEvent = {
+  watch_trigger_event_id: string;
+  watch_rule_id: string;
+  property_id: string;
+  listing_event_id: string | null;
+  trigger_type: string | null;
+  triggered_at: string | null;
+  summary: Record<string, unknown>;
+  invalidated_modules: string[];
+  reanalyzed_modules: string[];
+  previous_opportunity_assessment_id: string | null;
+  new_opportunity_assessment_id: string | null;
+  alert_id: string | null;
+};
+
 export type ActionQueueItem = {
   property_id: string;
   property_label: string | null;
@@ -101,6 +128,30 @@ export type PropertiesResponse = {
   pagination: Pagination;
 };
 
+export type WatchlistItem = {
+  property_id: string;
+  property_label: string | null;
+  location: LocationSummary;
+  asking_price: string | null;
+  currency: string | null;
+  max_buy_price: string | null;
+  gap_to_max_buy: string | null;
+  last_price_cut: string | null;
+  property_market_age_days: number | null;
+  watch_rule: WatchRule | null;
+  last_change: string | null;
+  last_change_summary: Record<string, unknown> | null;
+  recommended_action: string | null;
+  reason_codes: string[];
+  analysis_status: string;
+  current_listing: ListingSummary;
+};
+
+export type WatchlistResponse = {
+  items: WatchlistItem[];
+  pagination: Pagination;
+};
+
 export type PropertyDetail = {
   property: Record<string, unknown> & {
     property_id: string;
@@ -133,6 +184,11 @@ export type PropertyDetail = {
     }
   >;
   history: Array<Record<string, unknown> & { event_type: string; detected_at: string | null }>;
+  watch: {
+    is_watched: boolean;
+    active_rule: WatchRule | null;
+    latest_changes: WatchTriggerEvent[];
+  };
   comparables: {
     status: string;
     items: Array<Record<string, unknown> & { comparable_type: string }>;

@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, aliased
 
@@ -25,8 +26,10 @@ from app.db.models import (
     LiquidityAssessment,
     Listing,
     ListingEvent,
+    LlmAnalysis,
     OpportunityAssessment,
     Property,
+    PropertyAnalysisState,
     PropertyFeature,
     RiskAssessment,
     RiskFlag,
@@ -34,12 +37,20 @@ from app.db.models import (
     Source,
     SourceRuntimeState,
     Valuation,
+    WatchRule,
+    WatchTriggerEvent,
 )
 from app.domain.enums import (
     ListingEventType,
     ListingStatus,
     OpportunityAction,
     SourceHealthStatus,
+    WatchRuleType,
+)
+from app.watchlist.watchlist_service import (
+    create_or_update_watch_rule,
+    deactivate_watch_rules,
+    queue_manual_reanalysis,
 )
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_api_access)])
@@ -52,6 +63,14 @@ QUEUE_ACTIONS = (
     OpportunityAction.REVIEW,
     OpportunityAction.WATCH,
 )
+
+
+class WatchRuleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rule_type: WatchRuleType | None = None
+    threshold_numeric: Decimal | None = Field(default=None, gt=0)
+    rule_config: dict[str, Any] = Field(default_factory=dict)
 
 
 def _enum_value(value: Any) -> Any:
@@ -301,6 +320,130 @@ def _row_status(row: Any | None, latest_input_at: datetime | None) -> str:
 
 def _is_stale(row: Any | None, latest_input_at: datetime | None) -> bool:
     return _row_status(row, latest_input_at) == "STALE"
+
+
+def _state_status(
+    state: PropertyAnalysisState | None,
+    module: str,
+    row: Any | None,
+    latest_input_at: datetime | None,
+) -> str:
+    if state is None:
+        return _row_status(row, latest_input_at)
+    return str(_enum_value(getattr(state, f"{module}_status")))
+
+
+def _feature_status(
+    state: PropertyAnalysisState | None,
+    feature: PropertyFeature | None,
+) -> str:
+    if state is not None:
+        return str(_enum_value(state.features_status))
+    return "SUCCESS" if feature is not None else "NOT_RUN"
+
+
+def _matching_status(
+    state: PropertyAnalysisState | None,
+    listings: list[tuple[Listing, Source]],
+) -> str:
+    if state is not None:
+        return str(_enum_value(state.matching_status))
+    return "SUCCESS" if listings else "NOT_RUN"
+
+
+def _serialize_watch_rule(rule: WatchRule | None) -> dict[str, Any] | None:
+    if rule is None:
+        return None
+    return {
+        "watch_rule_id": str(rule.id),
+        "property_id": str(rule.property_id),
+        "is_active": rule.is_active,
+        "rule_type": str(_enum_value(rule.rule_type)) if rule.rule_type else None,
+        "threshold_numeric": _decimal(rule.threshold_numeric),
+        "rule_config": _json_safe(rule.rule_config_json),
+        "created_at": _iso(rule.created_at),
+        "triggered_at": _iso(rule.triggered_at),
+        "last_evaluated_at": _iso(rule.last_evaluated_at),
+    }
+
+
+def _serialize_watch_trigger(trigger: WatchTriggerEvent) -> dict[str, Any]:
+    return {
+        "watch_trigger_event_id": str(trigger.id),
+        "watch_rule_id": str(trigger.watch_rule_id),
+        "property_id": str(trigger.property_id),
+        "listing_event_id": str(trigger.listing_event_id) if trigger.listing_event_id else None,
+        "trigger_type": str(_enum_value(trigger.trigger_type)) if trigger.trigger_type else None,
+        "triggered_at": _iso(trigger.triggered_at),
+        "summary": _json_safe(trigger.summary_json),
+        "invalidated_modules": _json_safe(trigger.invalidated_modules_json),
+        "reanalyzed_modules": _json_safe(trigger.reanalyzed_modules_json),
+        "previous_opportunity_assessment_id": (
+            str(trigger.previous_opportunity_assessment_id)
+            if trigger.previous_opportunity_assessment_id
+            else None
+        ),
+        "new_opportunity_assessment_id": (
+            str(trigger.new_opportunity_assessment_id)
+            if trigger.new_opportunity_assessment_id
+            else None
+        ),
+        "alert_id": str(trigger.alert_id) if trigger.alert_id else None,
+    }
+
+
+def _latest_watch_rule_subquery() -> Any:
+    return (
+        select(
+            WatchRule.id.label("id"),
+            WatchRule.property_id.label("property_id"),
+            func.row_number()
+            .over(
+                partition_by=WatchRule.property_id,
+                order_by=(WatchRule.created_at.desc(), WatchRule.id.desc()),
+            )
+            .label("rn"),
+        )
+        .where(WatchRule.is_active.is_(True))
+        .subquery("latest_active_watch_rules")
+    )
+
+
+def _latest_watch_trigger_subquery() -> Any:
+    return select(
+        WatchTriggerEvent.id.label("id"),
+        WatchTriggerEvent.property_id.label("property_id"),
+        func.row_number()
+        .over(
+            partition_by=WatchTriggerEvent.property_id,
+            order_by=(
+                WatchTriggerEvent.triggered_at.desc(),
+                WatchTriggerEvent.created_at.desc(),
+                WatchTriggerEvent.id.desc(),
+            ),
+        )
+        .label("rn"),
+    ).subquery("latest_watch_trigger_events")
+
+
+def _latest_price_cut_subquery() -> Any:
+    price_cut_listing = aliased(Listing)
+    return (
+        select(
+            price_cut_listing.property_id.label("property_id"),
+            func.max(ListingEvent.detected_at).label("last_price_cut_at"),
+        )
+        .join(price_cut_listing, ListingEvent.listing_id == price_cut_listing.id)
+        .where(
+            price_cut_listing.property_id.is_not(None),
+            ListingEvent.event_type == ListingEventType.PRICE_CHANGED,
+            ListingEvent.old_price.is_not(None),
+            ListingEvent.new_price.is_not(None),
+            ListingEvent.new_price < ListingEvent.old_price,
+        )
+        .group_by(price_cut_listing.property_id)
+        .subquery("latest_price_cuts")
+    )
 
 
 def _source_warnings(session: Session) -> list[dict[str, Any]]:
@@ -576,6 +719,216 @@ def get_action_queue(
     }
 
 
+def _watch_gap(asking_price: Decimal | None, max_buy_price: Decimal | None) -> Decimal | None:
+    if asking_price is None or max_buy_price is None:
+        return None
+    return asking_price - max_buy_price
+
+
+def _serialize_watchlist_item(
+    property_: Property,
+    rule: WatchRule,
+    opportunity: OpportunityAssessment | None,
+    deal: DealAnalysis | None,
+    feature: PropertyFeature | None,
+    listing: Listing | None,
+    source: Source | None,
+    latest_event_at: datetime | None,
+    last_price_cut_at: datetime | None,
+    latest_trigger: WatchTriggerEvent | None,
+) -> dict[str, Any]:
+    asking_price = deal.asking_price if deal else listing.asking_price if listing else None
+    currency = listing.currency if listing else None
+    gap = _watch_gap(asking_price, deal.max_buy_price if deal else None)
+    last_change = _max_datetime(
+        latest_trigger.triggered_at if latest_trigger else None,
+        latest_event_at,
+        listing.last_seen_at if listing else None,
+        opportunity.created_at if opportunity else None,
+    )
+    return {
+        "property_id": str(property_.id),
+        "property_label": _property_label(property_, listing),
+        "location": _location(property_),
+        "asking_price": _decimal(asking_price),
+        "currency": str(_enum_value(currency)) if currency else None,
+        "max_buy_price": _decimal(deal.max_buy_price if deal else None),
+        "gap_to_max_buy": _decimal(gap),
+        "last_price_cut": _iso(last_price_cut_at),
+        "property_market_age_days": (
+            feature.property_market_age_days if feature else property_.estimated_market_age_days
+        ),
+        "watch_rule": _serialize_watch_rule(rule),
+        "last_change": _iso(last_change),
+        "last_change_summary": (
+            _json_safe(latest_trigger.summary_json) if latest_trigger is not None else None
+        ),
+        "recommended_action": (
+            str(_enum_value(opportunity.recommended_action)) if opportunity else None
+        ),
+        "reason_codes": _json_safe(opportunity.reason_codes_json) if opportunity else [],
+        "analysis_status": _row_status(opportunity, latest_event_at),
+        "current_listing": {
+            "listing_id": str(listing.id) if listing else None,
+            "source_code": source.code if source else None,
+            "source_name": source.name if source else None,
+            "status": str(_enum_value(listing.status)) if listing else None,
+            "url": listing.url if listing else None,
+        },
+    }
+
+
+@router.get("/watchlist")
+def get_watchlist(
+    session: DbSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> dict[str, Any]:
+    latest_watch_rule_sq = _latest_watch_rule_subquery()
+    latest_opportunity_sq = _latest_analysis_subquery(
+        OpportunityAssessment, "latest_watchlist_opportunities"
+    )
+    latest_feature_sq = _latest_feature_subquery()
+    latest_listing_sq = _latest_listing_subquery()
+    latest_event_sq = _latest_listing_event_subquery()
+    latest_price_cut_sq = _latest_price_cut_subquery()
+    latest_trigger_sq = _latest_watch_trigger_subquery()
+    current_listing = aliased(Listing)
+    current_source = aliased(Source)
+
+    gap_expression = DealAnalysis.asking_price - DealAnalysis.max_buy_price
+    positive_gap_rank = case((gap_expression >= 0, 0), else_=1)
+
+    stmt = (
+        select(
+            Property,
+            WatchRule,
+            OpportunityAssessment,
+            DealAnalysis,
+            PropertyFeature,
+            current_listing,
+            current_source,
+            latest_event_sq.c.last_event_at,
+            latest_price_cut_sq.c.last_price_cut_at,
+            WatchTriggerEvent,
+        )
+        .join(latest_watch_rule_sq, latest_watch_rule_sq.c.property_id == Property.id)
+        .join(
+            WatchRule,
+            (WatchRule.id == latest_watch_rule_sq.c.id) & (latest_watch_rule_sq.c.rn == 1),
+        )
+        .outerjoin(
+            latest_opportunity_sq,
+            (latest_opportunity_sq.c.property_id == Property.id)
+            & (latest_opportunity_sq.c.rn == 1),
+        )
+        .outerjoin(
+            OpportunityAssessment,
+            OpportunityAssessment.id == latest_opportunity_sq.c.id,
+        )
+        .outerjoin(DealAnalysis, OpportunityAssessment.deal_analysis_id == DealAnalysis.id)
+        .outerjoin(
+            latest_feature_sq,
+            (latest_feature_sq.c.property_id == Property.id) & (latest_feature_sq.c.rn == 1),
+        )
+        .outerjoin(PropertyFeature, PropertyFeature.id == latest_feature_sq.c.id)
+        .outerjoin(
+            latest_listing_sq,
+            (latest_listing_sq.c.property_id == Property.id) & (latest_listing_sq.c.rn == 1),
+        )
+        .outerjoin(current_listing, current_listing.id == latest_listing_sq.c.id)
+        .outerjoin(current_source, current_listing.source_id == current_source.id)
+        .outerjoin(latest_event_sq, latest_event_sq.c.property_id == Property.id)
+        .outerjoin(latest_price_cut_sq, latest_price_cut_sq.c.property_id == Property.id)
+        .outerjoin(
+            latest_trigger_sq,
+            (latest_trigger_sq.c.property_id == Property.id) & (latest_trigger_sq.c.rn == 1),
+        )
+        .outerjoin(
+            WatchTriggerEvent,
+            WatchTriggerEvent.id == latest_trigger_sq.c.id,
+        )
+    )
+    total = _count_from_stmt(session, stmt)
+    stmt = (
+        stmt.order_by(
+            positive_gap_rank.asc().nullslast(),
+            gap_expression.asc().nullslast(),
+            latest_event_sq.c.last_event_at.desc().nullslast(),
+            WatchRule.created_at.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+
+    return {
+        "items": [
+            _serialize_watchlist_item(
+                property_,
+                rule,
+                opportunity,
+                deal,
+                feature,
+                listing,
+                source_row,
+                latest_event_at,
+                last_price_cut_at,
+                latest_trigger,
+            )
+            for (
+                property_,
+                rule,
+                opportunity,
+                deal,
+                feature,
+                listing,
+                source_row,
+                latest_event_at,
+                last_price_cut_at,
+                latest_trigger,
+            ) in session.execute(stmt).all()
+        ],
+        "pagination": _pagination(page, page_size, total),
+    }
+
+
+@router.post("/properties/{property_id}/watch", status_code=status.HTTP_201_CREATED)
+def watch_property(
+    session: DbSession,
+    property_id: uuid.UUID,
+    payload: WatchRuleRequest,
+) -> dict[str, Any]:
+    property_ = _load_property(session, property_id)
+    try:
+        rule = create_or_update_watch_rule(
+            session,
+            property_,
+            rule_type=payload.rule_type,
+            threshold_numeric=payload.threshold_numeric,
+            rule_config=payload.rule_config,
+            commit=True,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    return {"status": "WATCHED", "watch_rule": _serialize_watch_rule(rule)}
+
+
+@router.delete("/properties/{property_id}/watch")
+def unwatch_property(session: DbSession, property_id: uuid.UUID) -> dict[str, Any]:
+    property_ = _load_property(session, property_id)
+    deactivated = deactivate_watch_rules(session, property_, commit=True)
+    return {"status": "UNWATCHED", "deactivated_count": len(deactivated)}
+
+
+@router.post("/properties/{property_id}/reanalyze")
+def reanalyze_property(session: DbSession, property_id: uuid.UUID) -> dict[str, Any]:
+    property_ = _load_property(session, property_id)
+    return queue_manual_reanalysis(session, property_, commit=True)
+
+
 def _serialize_property_list_item(
     property_: Property,
     opportunity: OpportunityAssessment | None,
@@ -761,6 +1114,18 @@ def _latest_feature_for_property(
     ).first()
 
 
+def _latest_llm_for_property(session: Session, property_id: uuid.UUID) -> LlmAnalysis | None:
+    return session.scalars(
+        select(LlmAnalysis)
+        .where(LlmAnalysis.property_id == property_id)
+        .order_by(
+            LlmAnalysis.completed_at.desc().nullslast(),
+            LlmAnalysis.created_at.desc(),
+            LlmAnalysis.id.desc(),
+        )
+    ).first()
+
+
 def _latest_listing_input_at(session: Session, property_id: uuid.UUID) -> datetime | None:
     last_seen_at = session.scalar(
         select(func.max(Listing.last_seen_at)).where(Listing.property_id == property_id)
@@ -926,6 +1291,32 @@ def _history_items(session: Session, property_id: uuid.UUID) -> list[dict[str, A
         key=lambda item: item["detected_at"] or "",
         reverse=True,
     )
+
+
+def _watch_detail(session: Session, property_: Property) -> dict[str, Any]:
+    active_rule = session.scalars(
+        select(WatchRule)
+        .where(
+            WatchRule.property_id == property_.id,
+            WatchRule.is_active.is_(True),
+        )
+        .order_by(WatchRule.created_at.desc(), WatchRule.id.desc())
+    ).first()
+    recent_triggers = session.scalars(
+        select(WatchTriggerEvent)
+        .where(WatchTriggerEvent.property_id == property_.id)
+        .order_by(
+            WatchTriggerEvent.triggered_at.desc(),
+            WatchTriggerEvent.created_at.desc(),
+            WatchTriggerEvent.id.desc(),
+        )
+        .limit(5)
+    ).all()
+    return {
+        "is_watched": active_rule is not None,
+        "active_rule": _serialize_watch_rule(active_rule),
+        "latest_changes": [_serialize_watch_trigger(trigger) for trigger in recent_triggers],
+    }
 
 
 def _serialize_valuation(valuation: Valuation | None, status_value: str) -> dict[str, Any]:
@@ -1204,6 +1595,7 @@ def get_property_detail(session: DbSession, property_id: uuid.UUID) -> dict[str,
     current_listing = listing_rows[0][0] if listing_rows else None
 
     comparable_set = _latest_for_property(session, ComparableSet, property_id)
+    llm_analysis = _latest_llm_for_property(session, property_id)
     valuation = _latest_for_property(session, Valuation, property_id)
     liquidity = _latest_for_property(session, LiquidityAssessment, property_id)
     fast_sale = _latest_for_property(session, FastSaleEstimate, property_id)
@@ -1211,9 +1603,11 @@ def get_property_detail(session: DbSession, property_id: uuid.UUID) -> dict[str,
     risk = _latest_for_property(session, RiskAssessment, property_id)
     deal = _latest_for_property(session, DealAnalysis, property_id)
     opportunity = _latest_for_property(session, OpportunityAssessment, property_id)
+    analysis_state = session.get(PropertyAnalysisState, property_id)
     latest_input_at = _latest_listing_input_at(session, property_id)
     last_analysis_at = _latest_analysis_at(
         comparable_set,
+        llm_analysis,
         valuation,
         liquidity,
         fast_sale,
@@ -1222,16 +1616,25 @@ def get_property_detail(session: DbSession, property_id: uuid.UUID) -> dict[str,
         deal,
         opportunity,
     )
+    if analysis_state is not None:
+        last_analysis_at = _max_datetime(
+            last_analysis_at,
+            analysis_state.last_analysis_completed_at,
+            analysis_state.last_analysis_started_at,
+        )
 
     statuses = {
-        "comparables": _row_status(comparable_set, latest_input_at),
-        "valuation": _row_status(valuation, latest_input_at),
-        "liquidity": _row_status(liquidity, latest_input_at),
-        "fast_sale": _row_status(fast_sale, latest_input_at),
-        "seller": _row_status(seller, latest_input_at),
-        "risk": _row_status(risk, latest_input_at),
-        "deal": _row_status(deal, latest_input_at),
-        "opportunity": _row_status(opportunity, latest_input_at),
+        "features": _feature_status(analysis_state, feature),
+        "matching": _matching_status(analysis_state, listing_rows),
+        "comparables": _state_status(analysis_state, "comparable", comparable_set, latest_input_at),
+        "valuation": _state_status(analysis_state, "valuation", valuation, latest_input_at),
+        "liquidity": _state_status(analysis_state, "liquidity", liquidity, latest_input_at),
+        "fast_sale": _state_status(analysis_state, "fast_sale", fast_sale, latest_input_at),
+        "llm": _state_status(analysis_state, "llm", llm_analysis, latest_input_at),
+        "seller": _state_status(analysis_state, "seller", seller, latest_input_at),
+        "risk": _state_status(analysis_state, "risk", risk, latest_input_at),
+        "deal": _state_status(analysis_state, "deal", deal, latest_input_at),
+        "opportunity": _state_status(analysis_state, "opportunity", opportunity, latest_input_at),
     }
 
     return {
@@ -1255,6 +1658,7 @@ def get_property_detail(session: DbSession, property_id: uuid.UUID) -> dict[str,
         },
         "listings": [_serialize_listing(listing, source) for listing, source in listing_rows],
         "history": _history_items(session, property_id),
+        "watch": _watch_detail(session, property_),
         "comparables": _serialize_comparables(session, comparable_set, statuses["comparables"]),
         "valuation": _serialize_valuation(valuation, statuses["valuation"]),
         "liquidity": _serialize_liquidity(

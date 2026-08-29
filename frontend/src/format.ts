@@ -43,6 +43,22 @@ export function displayDateTime(value: string | null | undefined): string {
   return parsed.toLocaleString();
 }
 
+export function displayWatchTrigger(
+  ruleType: string | null | undefined,
+  threshold: string | null | undefined,
+): string {
+  if (!ruleType) {
+    return "DEFAULT_RELEVANT_CHANGE";
+  }
+  if (ruleType === "PRICE_BELOW") {
+    return `PRICE_BELOW ${displayValue(threshold)}`;
+  }
+  if (ruleType === "PRICE_DROP_PERCENT") {
+    return `PRICE_DROP_PERCENT ${displayPercent(threshold)}`;
+  }
+  return ruleType;
+}
+
 export function statusTone(status: string | null | undefined): StatusTone {
   if (!status) {
     return "muted";

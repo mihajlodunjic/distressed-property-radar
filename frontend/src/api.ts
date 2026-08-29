@@ -49,13 +49,34 @@ async function responseMessage(response: Response): Promise<string> {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
+  return apiRequest<T>(path, { method: "GET" });
+}
+
+export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+  return apiRequest<T>(path, {
+    body: body === undefined ? undefined : JSON.stringify(body),
+    method: "POST",
+  });
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  return apiRequest<T>(path, { method: "DELETE" });
+}
+
+async function apiRequest<T>(path: string, init: RequestInit): Promise<T> {
   const headers = new Headers();
+  if (init.body !== undefined) {
+    headers.set("Content-Type", "application/json");
+  }
   const token = getAccessToken();
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { headers });
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers,
+  });
   if (!response.ok) {
     throw new ApiError(response.status, await responseMessage(response));
   }

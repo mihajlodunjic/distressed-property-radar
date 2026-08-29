@@ -27,7 +27,8 @@ a:hover {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -108,6 +109,41 @@ button:hover {
 
 .topbar-actions button {
   padding: 7px 10px;
+}
+
+.watch-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(120px, 180px) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.watch-field {
+  display: grid;
+  gap: 5px;
+}
+
+.watch-field span {
+  color: #627086;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.watch-form input,
+.watch-form select {
+  border: 1px solid #a9b6c5;
+  border-radius: 6px;
+  min-height: 38px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.watch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .content {
@@ -437,5 +473,9 @@ tbody tr:hover {
   table,
   .compact-table table {
     min-width: 720px;
+  }
+
+  .watch-form {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

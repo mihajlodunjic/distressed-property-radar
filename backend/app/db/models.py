@@ -25,6 +25,7 @@ from app.domain.enums import (
     AlertStatus,
     AlertType,
     AnalysisLevel,
+    AnalysisStatus,
     ComparableType,
     CurrencyCode,
     DataSourceKind,
@@ -49,6 +50,7 @@ from app.domain.enums import (
     SourceHealthStatus,
     ValuationModelType,
     ValuationStatus,
+    WatchRuleType,
 )
 
 
@@ -242,6 +244,19 @@ class Property(Base):
         cascade="all, delete-orphan",
     )
     alerts: Mapped[list[Alert]] = relationship(back_populates="property")
+    analysis_state: Mapped[PropertyAnalysisState | None] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    watch_rules: Mapped[list[WatchRule]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    watch_trigger_events: Mapped[list[WatchTriggerEvent]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
 
 
 class Listing(Base):
@@ -381,6 +396,172 @@ class ListingEvent(Base):
     )
 
     listing: Mapped[Listing] = relationship(back_populates="events")
+
+
+class PropertyAnalysisState(Base):
+    __tablename__ = "property_analysis_state"
+
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    features_status: Mapped[AnalysisStatus] = mapped_column(
+        _enum_column(AnalysisStatus, 20),
+        nullable=False,
+        default=AnalysisStatus.NOT_RUN,
+    )
+    matching_status: Mapped[AnalysisStatus] = mapped_column(
+        _enum_column(AnalysisStatus, 20),
+        nullable=False,
+        default=AnalysisStatus.NOT_RUN,
+    )
+    comparable_status: Mapped[AnalysisStatus] = mapped_column(
+        _enum_column(AnalysisStatus, 20),
+        nullable=False,
+        default=AnalysisStatus.NOT_RUN,
+    )
+    valuation_status: Mapped[AnalysisStatus] = mapped_column(
+        _enum_column(AnalysisStatus, 20),
+        nullable=False,
+        default=AnalysisStatus.NOT_RUN,
+    )
+    liquidity_status: Mapped[AnalysisStatus] = mapped_column(
+        _enum_column(AnalysisStatus, 20),
+        nullable=False,
+        default=AnalysisStatus.NOT_RUN,
+    )
+    fast_sale_status: Mapped[AnalysisStatus] = mapped_column(
+        _enum_column(AnalysisStatus, 20),
+        nullable=False,
+        default=AnalysisStatus.NOT_RUN,
+    )
+    llm_status: Mapped[AnalysisStatus] = mapped_column(
+        _enum_column(AnalysisStatus, 20),
+        nullable=False,
+        default=AnalysisStatus.NOT_RUN,
+    )
+    seller_status: Mapped[AnalysisStatus] = mapped_column(
+        _enum_column(AnalysisStatus, 20),
+        nullable=False,
+        default=AnalysisStatus.NOT_RUN,
+    )
+    risk_status: Mapped[AnalysisStatus] = mapped_column(
+        _enum_column(AnalysisStatus, 20),
+        nullable=False,
+        default=AnalysisStatus.NOT_RUN,
+    )
+    deal_status: Mapped[AnalysisStatus] = mapped_column(
+        _enum_column(AnalysisStatus, 20),
+        nullable=False,
+        default=AnalysisStatus.NOT_RUN,
+    )
+    opportunity_status: Mapped[AnalysisStatus] = mapped_column(
+        _enum_column(AnalysisStatus, 20),
+        nullable=False,
+        default=AnalysisStatus.NOT_RUN,
+    )
+    last_analysis_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_analysis_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="analysis_state")
+
+
+class WatchRule(Base):
+    __tablename__ = "watch_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    rule_type: Mapped[WatchRuleType | None] = mapped_column(
+        _enum_column(WatchRuleType, 32),
+    )
+    threshold_numeric: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    rule_config_json: Mapped[dict[str, object]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
+    last_triggered_change_key: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    property: Mapped[Property] = relationship(back_populates="watch_rules")
+    trigger_events: Mapped[list[WatchTriggerEvent]] = relationship(
+        back_populates="watch_rule",
+        cascade="all, delete-orphan",
+    )
+
+
+class WatchTriggerEvent(Base):
+    __tablename__ = "watch_trigger_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "watch_rule_id",
+            "change_key",
+            name="uq_watch_trigger_events_rule_change_key",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    watch_rule_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("watch_rules.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    listing_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("listing_events.id", ondelete="SET NULL"),
+    )
+    trigger_type: Mapped[WatchRuleType | None] = mapped_column(
+        _enum_column(WatchRuleType, 32),
+    )
+    change_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    summary_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    invalidated_modules_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    reanalyzed_modules_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    previous_opportunity_assessment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("opportunity_assessments.id", ondelete="SET NULL"),
+    )
+    new_opportunity_assessment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("opportunity_assessments.id", ondelete="SET NULL"),
+    )
+    alert_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("alerts.id", ondelete="SET NULL"),
+    )
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    watch_rule: Mapped[WatchRule] = relationship(back_populates="trigger_events")
+    property: Mapped[Property] = relationship(back_populates="watch_trigger_events")
 
 
 class ListingRawRecord(Base):

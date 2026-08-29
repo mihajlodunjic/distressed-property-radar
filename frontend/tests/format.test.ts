@@ -6,6 +6,7 @@ import {
   displayMoney,
   displayPercent,
   displayValue,
+  displayWatchTrigger,
   statusTone,
 } from "../src/format.js";
 
@@ -35,4 +36,11 @@ test("status tones make stale, failed, and block states visible", () => {
   assert.equal(statusTone("FAILED"), "critical");
   assert.equal(statusTone("BLOCK"), "critical");
   assert.equal(statusTone("SUCCESS"), "ok");
+});
+
+test("watch trigger formatting preserves default and threshold values", () => {
+  assert.equal(displayWatchTrigger(null, null), "DEFAULT_RELEVANT_CHANGE");
+  assert.equal(displayWatchTrigger("PRICE_BELOW", "142000.00"), "PRICE_BELOW 142000.00");
+  assert.equal(displayWatchTrigger("PRICE_DROP_PERCENT", "0.050000"), "PRICE_DROP_PERCENT 5.0%");
+  assert.equal(displayWatchTrigger("SELLER_CHANGE", null), "SELLER_CHANGE");
 });

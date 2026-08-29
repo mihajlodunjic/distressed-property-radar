@@ -11,6 +11,7 @@ from enum import StrEnum
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db.models import (
     JobRun,
     Listing,
@@ -36,6 +37,7 @@ from app.sources.four_zida.adapter import (
 )
 from app.sources.four_zida.dto import RawListingCard, RawListingDetail
 from app.sources.four_zida.parser import PARSER_VERSION
+from app.watchlist.watchlist_service import evaluate_watch_rules_for_listing_event
 
 FOUR_ZIDA_SOURCE_CODE = "four_zida"
 FOUR_ZIDA_BASE_URL = "https://www.4zida.rs"
@@ -82,6 +84,7 @@ class ListingPersistResult:
     is_new: bool = False
     is_changed: bool = False
     is_reappeared: bool = False
+    events: tuple[ListingEvent, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -227,6 +230,7 @@ async def run_four_zida_crawl_async(
                 changed_listings += 1
             if result.is_reappeared:
                 reappeared_count += 1
+            _evaluate_watch_events(session, result.events)
 
         if lifecycle_scan_complete:
             missing_result = _mark_missing_listing_observations(
@@ -569,6 +573,7 @@ async def _run_four_zida_deep_reconciliation_async(
                     changed_listings += 1
                 if result.is_reappeared:
                     reappeared_count += 1
+                _evaluate_watch_events(session, result.events)
         if owns_adapter:
             await active_adapter.__aexit__(None, None, None)
     except Exception as exc:
@@ -707,24 +712,26 @@ def _persist_listing(
                 payload=_detail_payload(detail),
                 content_hash=detail_hash,
             )
-        session.add(
-            ListingEvent(
-                listing=listing,
-                event_type=ListingEventType.DISCOVERED,
-                detected_at=seen_at,
-                old_value_json=None,
-                new_value_json={
-                    "status": ListingStatus.ACTIVE.value,
-                    "external_listing_id": card.external_listing_id,
-                    "url": card.canonical_url,
-                },
-                source_record_id=card_record.id,
-            )
+        discovered_event = ListingEvent(
+            listing=listing,
+            event_type=ListingEventType.DISCOVERED,
+            detected_at=seen_at,
+            old_value_json=None,
+            new_value_json={
+                "status": ListingStatus.ACTIVE.value,
+                "external_listing_id": card.external_listing_id,
+                "url": card.canonical_url,
+            },
+            source_record_id=card_record.id,
         )
-        return ListingPersistResult(is_new=True)
+        session.add(discovered_event)
+        session.flush()
+        return ListingPersistResult(is_new=True, events=(discovered_event,))
 
     old_price = listing.asking_price
     old_status = listing.status
+    old_description = listing.description
+    old_seller = _seller_snapshot(listing)
     listing.last_seen_at = seen_at
     listing.last_card_seen_at = seen_at
     if detail is not None:
@@ -764,8 +771,9 @@ def _persist_listing(
 
     is_changed = False
     is_reappeared = old_status in {ListingStatus.NOT_SEEN, ListingStatus.REMOVED}
+    events: list[ListingEvent] = []
     if is_reappeared:
-        session.add(
+        events.append(
             ListingEvent(
                 listing=listing,
                 event_type=ListingEventType.REAPPEARED,
@@ -779,7 +787,7 @@ def _persist_listing(
 
     new_price = listing.asking_price
     if old_price is not None and new_price is not None and old_price != new_price:
-        session.add(
+        events.append(
             ListingEvent(
                 listing=listing,
                 event_type=ListingEventType.PRICE_CHANGED,
@@ -792,7 +800,42 @@ def _persist_listing(
             )
         )
         is_changed = True
-    return ListingPersistResult(is_changed=is_changed, is_reappeared=is_reappeared)
+
+    if old_description != listing.description:
+        events.append(
+            ListingEvent(
+                listing=listing,
+                event_type=ListingEventType.DESCRIPTION_CHANGED,
+                detected_at=seen_at,
+                old_value_json={"description": old_description},
+                new_value_json={"description": listing.description},
+                source_record_id=detail_record.id if detail_record is not None else card_record.id,
+            )
+        )
+        is_changed = True
+
+    new_seller = _seller_snapshot(listing)
+    if old_seller != new_seller:
+        events.append(
+            ListingEvent(
+                listing=listing,
+                event_type=ListingEventType.SELLER_CHANGED,
+                detected_at=seen_at,
+                old_value_json=old_seller,
+                new_value_json=new_seller,
+                source_record_id=detail_record.id if detail_record is not None else card_record.id,
+            )
+        )
+        is_changed = True
+
+    if events:
+        session.add_all(events)
+        session.flush()
+    return ListingPersistResult(
+        is_changed=is_changed,
+        is_reappeared=is_reappeared,
+        events=tuple(events),
+    )
 
 
 def _apply_normalized_data(
@@ -827,6 +870,26 @@ def _apply_normalized_data(
         listing.seller_name = data.seller_name
     if data.agency_name is not None:
         listing.agency_name = data.agency_name
+
+
+def _seller_snapshot(listing: Listing) -> dict[str, object]:
+    return {
+        "seller_type": listing.seller_type.value,
+        "seller_name": listing.seller_name,
+        "agency_name": listing.agency_name,
+    }
+
+
+def _evaluate_watch_events(session: Session, events: tuple[ListingEvent, ...]) -> None:
+    if not events:
+        return
+    settings = get_settings()
+    for event in events:
+        evaluate_watch_rules_for_listing_event(
+            session,
+            event,
+            app_base_url=settings.app_base_url,
+        )
 
 
 def _find_listing(session: Session, source: Source, external_listing_id: str) -> Listing | None:
