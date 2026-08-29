@@ -21,6 +21,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.domain.enums import (
+    AlertChannel,
+    AlertStatus,
+    AlertType,
     AnalysisLevel,
     ComparableType,
     CurrencyCode,
@@ -35,6 +38,7 @@ from app.domain.enums import (
     LlmAnalysisStatus,
     MatchCandidateStatus,
     MatchDecision,
+    OpportunityAction,
     PropertyPipelineStatus,
     PropertyType,
     ReasonForSale,
@@ -233,6 +237,11 @@ class Property(Base):
         back_populates="property",
         cascade="all, delete-orphan",
     )
+    opportunity_assessments: Mapped[list[OpportunityAssessment]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    alerts: Mapped[list[Alert]] = relationship(back_populates="property")
 
 
 class Listing(Base):
@@ -1107,6 +1116,9 @@ class DealAnalysis(Base):
         back_populates="deal_analysis",
         cascade="all, delete-orphan",
     )
+    opportunity_assessments: Mapped[list[OpportunityAssessment]] = relationship(
+        back_populates="deal_analysis",
+    )
 
 
 class DealScenario(Base):
@@ -1136,6 +1148,93 @@ class DealScenario(Base):
     )
 
     deal_analysis: Mapped[DealAnalysis] = relationship(back_populates="scenarios")
+
+
+class OpportunityAssessment(Base):
+    __tablename__ = "opportunity_assessments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    deal_analysis_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("deal_analyses.id", ondelete="SET NULL"),
+    )
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    recommended_action: Mapped[OpportunityAction] = mapped_column(
+        _enum_column(OpportunityAction, 24),
+        nullable=False,
+    )
+    opportunity_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    ranking_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    reason_codes_json: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    explanation_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    rules_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    state_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="opportunity_assessments")
+    deal_analysis: Mapped[DealAnalysis | None] = relationship(
+        back_populates="opportunity_assessments",
+    )
+    alerts: Mapped[list[Alert]] = relationship(
+        back_populates="opportunity_assessment",
+        cascade="all, delete-orphan",
+    )
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    __table_args__ = (UniqueConstraint("dedupe_key", name="uq_alerts_dedupe_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="SET NULL"),
+    )
+    opportunity_assessment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("opportunity_assessments.id", ondelete="SET NULL"),
+    )
+    channel: Mapped[AlertChannel] = mapped_column(
+        _enum_column(AlertChannel, 32),
+        nullable=False,
+    )
+    alert_type: Mapped[AlertType] = mapped_column(
+        _enum_column(AlertType, 32),
+        nullable=False,
+    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason_code: Mapped[str | None] = mapped_column(String(100))
+    dedupe_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    payload_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[AlertStatus] = mapped_column(
+        _enum_column(AlertStatus, 20),
+        nullable=False,
+    )
+    send_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    error_message: Mapped[str | None] = mapped_column(Text)
+
+    property: Mapped[Property | None] = relationship(back_populates="alerts")
+    opportunity_assessment: Mapped[OpportunityAssessment | None] = relationship(
+        back_populates="alerts",
+    )
 
 
 class JobRun(Base):

@@ -8,11 +8,11 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 10 - Opportunity Engine & Telegram Alerts
-    Current task: Phase 10 - implement rules-based opportunity engine and Telegram alerts
+    Current phase: PHASE 12 - Watchlist, Reanalysis & Change Intelligence
+    Current task: Phase 12 - implement watchlist, watch rules, change intelligence, selective reanalysis, and action upgrades
     Task state: READY
 
-Phase 9 is complete.
+Phase 11 is complete.
 
 ## Completed Phases
 
@@ -26,10 +26,12 @@ Phase 9 is complete.
     PHASE 7 - Liquidity & Fast-Sale Analysis: COMPLETED
     PHASE 8 - LLM Seller Intelligence & Risk: COMPLETED
     PHASE 9 - Deal Engine & Investment Profiles: COMPLETED
+    PHASE 10 - Opportunity Engine & Telegram Alerts: COMPLETED
+    PHASE 11 - First Usable Dashboard: COMPLETED
 
 ## Completed Tasks
 
-- Phase 9 cost profiles, investment profiles, deterministic Decimal deal calculations, Max Buy, required negotiation, DOWNSIDE/BASE/UPSIDE scenarios, insufficient-data handling, versioned persistence, and tests are implemented and verified.
+- Phase 11 private V0 dashboard/API is implemented and verified: Action Queue, Properties List, Property Detail, Source Health, Basic Settings, loading/empty/error/auth/UNKNOWN/STALE/BLOCK states, and frontend/backend tests/checks.
 
 ## Current Implementation Facts
 
@@ -37,9 +39,9 @@ Phase 9 is complete.
 - Backend configuration: centralized settings in `backend/app/core/config.py`, loaded from environment variables and optional root `.env`.
 - Backend logging: basic startup logging exists and does not log secrets.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
-- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, `RiskGateEffect`, `DealAnalysisStatus`, and `DealScenarioType` exist in `backend/app/domain/enums.py`.
-- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, `CostProfile`, `InvestmentProfile`, `DealAnalysis`, `DealScenario`, and `JobRun` exist in `backend/app/db/models.py`.
-- Migrations: Alembic is configured; current head is `0010_deal_engine`.
+- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, `RiskGateEffect`, `DealAnalysisStatus`, `DealScenarioType`, `OpportunityAction`, `AlertChannel`, `AlertType`, and `AlertStatus` exist in `backend/app/domain/enums.py`.
+- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, `CostProfile`, `InvestmentProfile`, `DealAnalysis`, `DealScenario`, `OpportunityAssessment`, `Alert`, and `JobRun` exist in `backend/app/db/models.py`.
+- Migrations: Alembic is configured; current head is `0011_opportunity_alerts`.
 - Bootstrap sources: migrations seed stable `manual` and `four_zida` sources with `source_runtime_state` rows.
 - Critical listing invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
 - `listing_raw_records` stores deduped CARD/DETAIL raw payloads by listing, record type, and content hash.
@@ -97,11 +99,33 @@ Phase 9 is complete.
 - `deal_scenarios` persists one DOWNSIDE, BASE, and UPSIDE child row per successful deal analysis, with assumptions JSON preserving cost breakdown and scenario-specific renovation/holding assumptions.
 - Phase 9 deal math uses Decimal-only Total Cost Basis, Net Sale Proceeds, Net Profit, ROI, linear Annualized ROI, Capital Days, Profit / Capital-Day, Max Buy, and Required Negotiation.
 - Unknown required financial inputs such as renovation cost create explicit `INSUFFICIENT_DATA` deal rows instead of fabricated zero-cost calculations.
+- Opportunity module: `backend/app/opportunities/opportunity_engine.py` implements `opportunity_rules_v1`.
+- `opportunity_assessments` persists historical recommended action, score, ranking, reason codes, explanations, rules version, and semantic `state_hash`.
+- Phase 10 actions are rules-based: `IGNORE`, `WATCH`, `REVIEW`, `CALL`, and `URGENT_CALL`.
+- Hard gates, minimum data, confidence thresholds, and economic thresholds run before ranking/action alert eligibility; hard `BLOCK`, low-confidence, and negative/failed-economics states cannot produce `CALL` or `URGENT_CALL`.
+- Opportunity ranking is simple and explainable, prioritizing expected profit, downside profit, ROI, profit per capital-day, and required negotiation.
+- `alerts` persists Telegram opportunity/operational alert records with `PENDING`, `SENT`, `FAILED`, and `SUPPRESSED` states, unique `dedupe_key`, payload, provider metadata, attempt count, and failure reason.
+- Alert dedupe uses property, recommended action, and semantic opportunity `state_hash`; unchanged opportunity states do not create duplicate logical alerts.
+- Telegram delivery is implemented behind `backend/app/opportunities/telegram.py`; automated tests use fake providers, not the real Telegram API.
+- Only `CALL` and `URGENT_CALL` opportunity actions are Telegram alert-eligible in Phase 10.
+- Dashboard API: `backend/app/api/dashboard.py` exposes read-only `GET /api/v1/action-queue`, `GET /api/v1/properties`, `GET /api/v1/properties/{id}`, `GET /api/v1/properties/{id}/history`, `GET /api/v1/sources`, and `GET /api/v1/settings`.
+- API access: `backend/app/api/dependencies.py` provides DB-session dependency and a single-user bearer-token guard. If `API_ACCESS_TOKEN` is configured it is required; production fails closed when the token is missing. Local development/test can run without a token.
+- API routing/CORS: `backend/app/main.py` registers `/api/v1/health`, the dashboard router, and non-wildcard CORS origins from `CORS_ALLOWED_ORIGINS`.
+- Action Queue API uses backend opportunity/deal/valuation/liquidity/risk read models, excludes `IGNORE` by default, returns summary counts, source warnings, pagination, whitelist sorting/filtering, and preserves `null` as UNKNOWN.
+- Property Detail API returns decision header, listings, listing history, comparables, valuation, liquidity/fast-sale, seller, risk flags, deal economics/scenarios/costs, and freshness/statuses. Stale display state is derived from listing inputs newer than current analysis `as_of`; historical rows are not overwritten.
+- Source Health API returns one row per source with runtime state, latest job summary, recent errors, parse health, enabled state, and dashboard warnings.
+- Settings API is read-only and reports investment/cost profile summaries, notification/configuration booleans, CORS origins, and source counts without exposing secret values.
+- Frontend dashboard: `frontend/src/App.tsx` implements Action Queue, Properties, Property Detail, Source Health, and Settings routes against the implemented `/api/v1` contracts.
+- Frontend API client stores the optional private API token in session storage and never hardcodes a token in source.
+- Frontend status/format helpers preserve UNKNOWN instead of converting it to zero/false/empty display values and render STALE/FAILED/BLOCK as explicit text statuses.
 - Parser fixtures exist under `backend/tests/fixtures/four_zida` and do not depend on live portal state.
 - Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, zero-result anomaly safety, Phase 4 duplicate matching, ambiguous candidates, non-matches, manual precedence, rejected candidate behavior, idempotent matching, Phase 5 location normalization, historical feature calculation, market age/relist distinction, effective values, Data Quality V1, missing critical fields, recalculation, Phase 6 comparable filtering/ranking, listing/transaction distinction, outliers, valuation, confidence behavior, insufficient data, historical `as_of` protection, Phase 7 liquidity rules, UNKNOWN behavior, Fast-Sale Value ordering, target-day behavior, versioned persistence, Phase 8 LLM schema validation, UNKNOWN preservation, cache behavior, provider outage behavior, deterministic seller signals, manual seller/risk precedence, Risk Gate behavior, soft risks, evidence persistence, Phase 9 fixed/percentage costs, sale costs, total cost basis, net proceeds, profit, ROI, annualized ROI, risk reserve, Max Buy, required negotiation, scenario calculations, invalid inputs, Decimal precision, and versioned persistence.
-- Health endpoint: `GET /health` checks application process, PostgreSQL connectivity, and PostGIS availability.
-- Frontend: minimal Vite React shell exists under `frontend`.
-- `.env.example` documents required variable names with local-only example values and no real secrets.
+- Backend tests also cover Phase 10 action classification, hard gates, confidence/downside thresholds, reason codes, ranking, full opportunity-to-notification flow, alert lifecycle, retry, dedupe, action upgrade, and operational/opportunity alert separation.
+- Backend tests also cover Phase 11 private API auth, Action Queue contract, empty queue, no obvious Action Queue N+1 query pattern, Property Detail UNKNOWN/STALE/BLOCK/history/analysis sections, Source Health, Settings secrecy, and `/api/v1/health`.
+- Frontend tests cover UNKNOWN rendering and critical status formatting for STALE/FAILED/BLOCK. Frontend build/typecheck is configured through `npm run build`; no separate frontend lint script exists.
+- Health endpoints: `GET /health` and `GET /api/v1/health` check application process, PostgreSQL connectivity, and PostGIS availability.
+- Frontend: Vite React dashboard exists under `frontend`.
+- `.env.example` documents required variable names with local-only example values and no real secrets, including empty `API_ACCESS_TOKEN`, `LLM_API_KEY`, Telegram token/chat values, and configured CORS origin names.
 - Production deployment: none.
 - Production data: none.
 
@@ -124,23 +148,20 @@ Phase 9 is complete.
 
 Implement only:
 
-    PHASE 10 - Opportunity Engine & Telegram Alerts
+    PHASE 12 - Watchlist, Reanalysis & Change Intelligence
 
 Exact first logical task:
 
-    Implement the minimal Phase 10 rules-based opportunity and alert flow:
-    opportunity_assessments and alerts persistence; IGNORE/WATCH/REVIEW/CALL/
-    URGENT_CALL decisions; hard-gate checks before scoring; simple explainable
-    ranking from existing deal/risk/liquidity/seller metrics; conservative
-    no-qualifying-opportunities behavior; Telegram sender abstraction with
-    mocked tests; alert dedupe; concise message content; and property deep link.
+    Implement watchlist persistence and API/UI actions for WATCH properties,
+    including watch rules and What Changed output, so triggered listing changes
+    run selective reanalysis before opportunity/action-alert decisions.
 
 Do not implement:
 
-- Phase 11 dashboard/action queue UI;
-- production manual-call workflow;
+- Phase 13 acquisition CRM/human feedback;
+- generic CRM or kanban workflow;
 - portfolio/transaction import;
-- multi-channel notification infrastructure;
+- multi-channel notification infrastructure beyond existing Telegram alerts;
 - additional markets or sources.
 
 ## Required Context
@@ -152,60 +173,57 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 10 - Opportunity Engine & Telegram Alerts
+    -> PHASE 12 - Watchlist, Reanalysis & Change Intelligence
 
 Relevant specification sections only:
 
-    docs/01-product-specification.md
-    -> Action Queue
-    -> Alert philosophy
-    -> Telegram
-
     docs/03-data-model.md
-    -> opportunity_assessments
-    -> alerts
+    -> watch_rules
+    -> analytical current/stale state
 
     docs/05-analysis-specification.md
-    -> Opportunity Assessment
-    -> Hard Conditions
-    -> Recommended Actions
-    -> Hard Gate
-    -> Ranking
-    -> No-Deal Behavior
+    -> Re-analysis
+    -> invalidation rules
+    -> Watch Threshold Crossing
 
     docs/06-api-ui-specification.md
-    -> decision summary
-    -> Telegram deep link
+    -> Watch
+    -> Watchlist
+    -> What Changed
+    -> Reanalysis API
 
     docs/08-testing-specification.md
-    -> Phase 10 opportunity and Telegram tests
+    -> Phase 12 watch trigger/reanalysis tests
 
 Existing implementation to inspect:
 
-    backend/app/domain/enums.py
+    backend/app/api/
     backend/app/db/models.py
-    backend/alembic/
+    backend/app/opportunities/
+    backend/app/deals/
     backend/app/valuation/
     backend/app/liquidity/
     backend/app/intelligence/
-    backend/app/deals/
+    backend/app/ingestion/
+    backend/app/crawling/
+    frontend/
     backend/tests/
 
-Do not load later-phase specifications unless a concrete Phase 10 dependency requires them.
+Do not load Phase 13+ specifications unless a concrete Phase 12 dependency requires them.
 
-## Phase 10 Completion Gate
+## Phase 12 Completion Gate
 
-Phase 10 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
+Phase 12 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
 
 At minimum verify:
 
-- a test/new property can pass ingestion -> property -> analysis -> deal -> opportunity -> alert without manual intervention;
-- unchanged opportunity state does not send the same alert again;
-- hard `BLOCK` cannot be overridden by opportunity score;
-- Telegram provider is mocked in automated tests;
-- `NO QUALIFYING OPPORTUNITIES` is a valid result.
+- a WATCH property can have a watch rule;
+- a relevant listing change triggers current selective reanalysis;
+- What Changed output explains the trigger;
+- a WATCH property can upgrade to CALL after reanalysis;
+- Telegram alert decision uses fresh analysis and does not use stale deal results.
 
-Do not implement Phase 11 dashboard UI.
+Do not implement Phase 13 acquisition CRM/human feedback behavior.
 
 ## Update Rules
 

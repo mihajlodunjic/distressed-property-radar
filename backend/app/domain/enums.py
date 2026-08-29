@@ -179,3 +179,27 @@ class DealScenarioType(StrEnum):
     DOWNSIDE = "DOWNSIDE"
     BASE = "BASE"
     UPSIDE = "UPSIDE"
+
+
+class OpportunityAction(StrEnum):
+    IGNORE = "IGNORE"
+    WATCH = "WATCH"
+    REVIEW = "REVIEW"
+    CALL = "CALL"
+    URGENT_CALL = "URGENT_CALL"
+
+
+class AlertChannel(StrEnum):
+    TELEGRAM = "TELEGRAM"
+
+
+class AlertType(StrEnum):
+    OPPORTUNITY = "OPPORTUNITY"
+    OPERATIONAL = "OPERATIONAL"
+
+
+class AlertStatus(StrEnum):
+    PENDING = "PENDING"
+    SENT = "SENT"
+    FAILED = "FAILED"
+    SUPPRESSED = "SUPPRESSED"

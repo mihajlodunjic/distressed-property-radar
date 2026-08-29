@@ -11,6 +11,7 @@ def test_create_app_registers_health_route() -> None:
 
     assert isinstance(app, FastAPI)
     assert "/health" in app.openapi()["paths"]
+    assert "/api/v1/health" in app.openapi()["paths"]
 
 
 def test_health_returns_success_response(client: TestClient) -> None:
@@ -20,3 +21,10 @@ def test_health_returns_success_response(client: TestClient) -> None:
     assert response.json()["status"] == "ok"
     assert response.json()["database"]["status"] == "ok"
     assert response.json()["postgis"]["status"] == "ok"
+
+
+def test_api_v1_health_returns_success_response(client: TestClient) -> None:
+    response = client.get("/api/v1/health")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"

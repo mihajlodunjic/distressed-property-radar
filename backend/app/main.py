@@ -5,7 +5,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.dashboard import router as dashboard_router
 from app.api.health import router as health_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -27,8 +29,21 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    settings = get_settings()
     app = FastAPI(title="Distressed Property Radar", lifespan=lifespan)
+    allowed_origins = [
+        origin.strip() for origin in settings.cors_allowed_origins.split(",") if origin.strip()
+    ]
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_methods=["GET"],
+            allow_headers=["Authorization", "Content-Type"],
+        )
     app.include_router(health_router)
+    app.include_router(health_router, prefix="/api/v1")
+    app.include_router(dashboard_router)
     return app
 
 
