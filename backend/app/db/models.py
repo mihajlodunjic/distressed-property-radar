@@ -25,6 +25,8 @@ from app.domain.enums import (
     ComparableType,
     CurrencyCode,
     DataSourceKind,
+    DealAnalysisStatus,
+    DealScenarioType,
     FastSaleStatus,
     LiquidityStatus,
     ListingEventType,
@@ -224,6 +226,10 @@ class Property(Base):
         cascade="all, delete-orphan",
     )
     risk_assessments: Mapped[list[RiskAssessment]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    deal_analyses: Mapped[list[DealAnalysis]] = relationship(
         back_populates="property",
         cascade="all, delete-orphan",
     )
@@ -701,6 +707,7 @@ class Valuation(Base):
     fast_sale_estimates: Mapped[list[FastSaleEstimate]] = relationship(
         back_populates="valuation",
     )
+    deal_analyses: Mapped[list[DealAnalysis]] = relationship(back_populates="valuation")
 
 
 class LiquidityAssessment(Base):
@@ -738,6 +745,9 @@ class LiquidityAssessment(Base):
     property: Mapped[Property] = relationship(back_populates="liquidity_assessments")
     valuation: Mapped[Valuation | None] = relationship(back_populates="liquidity_assessments")
     fast_sale_estimates: Mapped[list[FastSaleEstimate]] = relationship(
+        back_populates="liquidity_assessment",
+    )
+    deal_analyses: Mapped[list[DealAnalysis]] = relationship(
         back_populates="liquidity_assessment",
     )
 
@@ -782,6 +792,9 @@ class FastSaleEstimate(Base):
     valuation: Mapped[Valuation | None] = relationship(back_populates="fast_sale_estimates")
     liquidity_assessment: Mapped[LiquidityAssessment | None] = relationship(
         back_populates="fast_sale_estimates",
+    )
+    deal_analyses: Mapped[list[DealAnalysis]] = relationship(
+        back_populates="fast_sale_estimate",
     )
 
 
@@ -913,6 +926,7 @@ class RiskAssessment(Base):
         back_populates="risk_assessment",
         cascade="all, delete-orphan",
     )
+    deal_analyses: Mapped[list[DealAnalysis]] = relationship(back_populates="risk_assessment")
 
 
 class RiskFlag(Base):
@@ -940,6 +954,188 @@ class RiskFlag(Base):
     evidence_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
 
     risk_assessment: Mapped[RiskAssessment] = relationship(back_populates="flags")
+
+
+class CostProfile(Base):
+    __tablename__ = "cost_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    currency: Mapped[CurrencyCode] = mapped_column(_enum_column(CurrencyCode, 3), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    purchase_tax_rule_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    notary_rule_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    lawyer_rule_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    agency_rule_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    sale_cost_rule_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    holding_cost_rule_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    financing_rule_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    other_cost_rule_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    version: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    deal_analyses: Mapped[list[DealAnalysis]] = relationship(back_populates="cost_profile")
+
+
+class InvestmentProfile(Base):
+    __tablename__ = "investment_profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    min_expected_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    min_downside_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    min_roi: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    max_expected_holding_days: Mapped[int | None] = mapped_column(Integer)
+    min_liquidity_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    min_valuation_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    default_risk_reserve: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    desired_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    version: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    deal_analyses: Mapped[list[DealAnalysis]] = relationship(back_populates="investment_profile")
+
+
+class DealAnalysis(Base):
+    __tablename__ = "deal_analyses"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    valuation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("valuations.id", ondelete="SET NULL"),
+    )
+    liquidity_assessment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("liquidity_assessments.id", ondelete="SET NULL"),
+    )
+    fast_sale_estimate_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("fast_sale_estimates.id", ondelete="SET NULL"),
+    )
+    risk_assessment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("risk_assessments.id", ondelete="SET NULL"),
+    )
+    cost_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cost_profiles.id", ondelete="RESTRICT"),
+    )
+    investment_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("investment_profiles.id", ondelete="RESTRICT"),
+    )
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[DealAnalysisStatus] = mapped_column(
+        _enum_column(DealAnalysisStatus, 32),
+        nullable=False,
+    )
+    assumed_purchase_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    asking_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    purchase_costs: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    renovation_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    sale_costs: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    taxes: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    financing_costs: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    holding_costs: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    risk_reserve: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    other_costs: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    total_cost_basis: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    expected_exit_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    max_buy_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    required_negotiation_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    required_negotiation_pct: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    expected_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    downside_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    upside_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    roi: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    annualized_roi: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    expected_holding_days: Mapped[int | None] = mapped_column(Integer)
+    capital_days: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
+    profit_per_capital_day: Mapped[Decimal | None] = mapped_column(Numeric(18, 10))
+    formula_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    input_summary_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    explanation_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="deal_analyses")
+    valuation: Mapped[Valuation | None] = relationship(back_populates="deal_analyses")
+    liquidity_assessment: Mapped[LiquidityAssessment | None] = relationship(
+        back_populates="deal_analyses",
+    )
+    fast_sale_estimate: Mapped[FastSaleEstimate | None] = relationship(
+        back_populates="deal_analyses",
+    )
+    risk_assessment: Mapped[RiskAssessment | None] = relationship(
+        back_populates="deal_analyses",
+    )
+    cost_profile: Mapped[CostProfile | None] = relationship(back_populates="deal_analyses")
+    investment_profile: Mapped[InvestmentProfile | None] = relationship(
+        back_populates="deal_analyses",
+    )
+    scenarios: Mapped[list[DealScenario]] = relationship(
+        back_populates="deal_analysis",
+        cascade="all, delete-orphan",
+    )
+
+
+class DealScenario(Base):
+    __tablename__ = "deal_scenarios"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    deal_analysis_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("deal_analyses.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    scenario_type: Mapped[DealScenarioType] = mapped_column(
+        _enum_column(DealScenarioType, 16),
+        nullable=False,
+    )
+    purchase_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    exit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    cost_basis: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    profit: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    roi: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    holding_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    assumptions_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    deal_analysis: Mapped[DealAnalysis] = relationship(back_populates="scenarios")
 
 
 class JobRun(Base):

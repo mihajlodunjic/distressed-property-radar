@@ -168,3 +168,14 @@ class RiskGateEffect(StrEnum):
     NONE = "NONE"
     VERIFY = "VERIFY"
     BLOCK = "BLOCK"
+
+
+class DealAnalysisStatus(StrEnum):
+    SUCCESS = "SUCCESS"
+    INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+
+
+class DealScenarioType(StrEnum):
+    DOWNSIDE = "DOWNSIDE"
+    BASE = "BASE"
+    UPSIDE = "UPSIDE"

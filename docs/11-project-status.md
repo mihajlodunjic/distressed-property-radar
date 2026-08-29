@@ -8,11 +8,11 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 9 - Deal Engine & Investment Profiles
-    Current task: Phase 9 - implement deterministic deal engine and investment profiles
+    Current phase: PHASE 10 - Opportunity Engine & Telegram Alerts
+    Current task: Phase 10 - implement rules-based opportunity engine and Telegram alerts
     Task state: READY
 
-Phase 8 is complete.
+Phase 9 is complete.
 
 ## Completed Phases
 
@@ -25,10 +25,11 @@ Phase 8 is complete.
     PHASE 6 - Comparable Engine & V1 Valuation: COMPLETED
     PHASE 7 - Liquidity & Fast-Sale Analysis: COMPLETED
     PHASE 8 - LLM Seller Intelligence & Risk: COMPLETED
+    PHASE 9 - Deal Engine & Investment Profiles: COMPLETED
 
 ## Completed Tasks
 
-- Phase 8 LLM structured extraction, semantic input caching, seller intelligence, risk gate, hard/soft risk flags, manual precedence, evidence preservation, UNKNOWN handling, outage handling, persistence, and tests are implemented and verified.
+- Phase 9 cost profiles, investment profiles, deterministic Decimal deal calculations, Max Buy, required negotiation, DOWNSIDE/BASE/UPSIDE scenarios, insufficient-data handling, versioned persistence, and tests are implemented and verified.
 
 ## Current Implementation Facts
 
@@ -36,9 +37,9 @@ Phase 8 is complete.
 - Backend configuration: centralized settings in `backend/app/core/config.py`, loaded from environment variables and optional root `.env`.
 - Backend logging: basic startup logging exists and does not log secrets.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
-- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, and `RiskGateEffect` exist in `backend/app/domain/enums.py`.
-- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, and `JobRun` exist in `backend/app/db/models.py`.
-- Migrations: Alembic is configured; current head is `0009_llm_seller_risk`.
+- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, `RiskGateEffect`, `DealAnalysisStatus`, and `DealScenarioType` exist in `backend/app/domain/enums.py`.
+- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, `CostProfile`, `InvestmentProfile`, `DealAnalysis`, `DealScenario`, and `JobRun` exist in `backend/app/db/models.py`.
+- Migrations: Alembic is configured; current head is `0010_deal_engine`.
 - Bootstrap sources: migrations seed stable `manual` and `four_zida` sources with `source_runtime_state` rows.
 - Critical listing invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
 - `listing_raw_records` stores deduped CARD/DETAIL raw payloads by listing, record type, and content hash.
@@ -89,8 +90,15 @@ Phase 8 is complete.
 - `seller_assessments` persists effective seller motivation, negotiability, cash preference, reason for sale, confidence, source evidence, model version, and manual-precedence explanations.
 - `risk_assessments` and `risk_flags` persist PASS/VERIFY/BLOCK gate results, hard/soft flags, provenance, confidence, evidence, and rules version.
 - Phase 8 risk logic keeps seller motivation separate from the Risk Gate; verified/manual risk input can suppress weaker scraped/derived/LLM claims without deleting historical source rows.
+- Deal module: `backend/app/deals/deal_engine.py` implements `deal_formula_v1` and `deal_scenario_rules_v1`.
+- Cost assumptions are persisted in `cost_profiles` JSON rule fields; the engine supports fixed amounts, purchase-price percentages, exit-price percentages, and per-day holding costs without LLM math.
+- Investment criteria are persisted in `investment_profiles`, including minimum profit, downside profit, ROI, holding days, liquidity/confidence thresholds, risk reserve, desired profit, and version.
+- `deal_analyses` are immutable historical results linked to property, valuation, liquidity, fast-sale, risk, cost profile, and investment profile inputs.
+- `deal_scenarios` persists one DOWNSIDE, BASE, and UPSIDE child row per successful deal analysis, with assumptions JSON preserving cost breakdown and scenario-specific renovation/holding assumptions.
+- Phase 9 deal math uses Decimal-only Total Cost Basis, Net Sale Proceeds, Net Profit, ROI, linear Annualized ROI, Capital Days, Profit / Capital-Day, Max Buy, and Required Negotiation.
+- Unknown required financial inputs such as renovation cost create explicit `INSUFFICIENT_DATA` deal rows instead of fabricated zero-cost calculations.
 - Parser fixtures exist under `backend/tests/fixtures/four_zida` and do not depend on live portal state.
-- Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, zero-result anomaly safety, Phase 4 duplicate matching, ambiguous candidates, non-matches, manual precedence, rejected candidate behavior, idempotent matching, Phase 5 location normalization, historical feature calculation, market age/relist distinction, effective values, Data Quality V1, missing critical fields, recalculation, Phase 6 comparable filtering/ranking, listing/transaction distinction, outliers, valuation, confidence behavior, insufficient data, historical `as_of` protection, Phase 7 liquidity rules, UNKNOWN behavior, Fast-Sale Value ordering, target-day behavior, versioned persistence, Phase 8 LLM schema validation, UNKNOWN preservation, cache behavior, provider outage behavior, deterministic seller signals, manual seller/risk precedence, Risk Gate behavior, soft risks, and evidence persistence.
+- Backend tests cover Phase 0/1 checks plus Phase 2/3 parser, normalization, mocked HTTP, pagination, ingestion idempotency, raw records, job summaries, price changes, lifecycle transitions, source health, scheduled job handling, partial-scan safety, zero-result anomaly safety, Phase 4 duplicate matching, ambiguous candidates, non-matches, manual precedence, rejected candidate behavior, idempotent matching, Phase 5 location normalization, historical feature calculation, market age/relist distinction, effective values, Data Quality V1, missing critical fields, recalculation, Phase 6 comparable filtering/ranking, listing/transaction distinction, outliers, valuation, confidence behavior, insufficient data, historical `as_of` protection, Phase 7 liquidity rules, UNKNOWN behavior, Fast-Sale Value ordering, target-day behavior, versioned persistence, Phase 8 LLM schema validation, UNKNOWN preservation, cache behavior, provider outage behavior, deterministic seller signals, manual seller/risk precedence, Risk Gate behavior, soft risks, evidence persistence, Phase 9 fixed/percentage costs, sale costs, total cost basis, net proceeds, profit, ROI, annualized ROI, risk reserve, Max Buy, required negotiation, scenario calculations, invalid inputs, Decimal precision, and versioned persistence.
 - Health endpoint: `GET /health` checks application process, PostgreSQL connectivity, and PostGIS availability.
 - Frontend: minimal Vite React shell exists under `frontend`.
 - `.env.example` documents required variable names with local-only example values and no real secrets.
@@ -116,27 +124,23 @@ Phase 8 is complete.
 
 Implement only:
 
-    PHASE 9 - Deal Engine & Investment Profiles
+    PHASE 10 - Opportunity Engine & Telegram Alerts
 
 Exact first logical task:
 
-    Implement the minimal Phase 9 deterministic deal engine and investment
-    profile foundation: cost_profiles, investment_profiles, deal_analyses,
-    and deal_scenarios persistence; Decimal-only Total Cost Basis, Net Profit,
-    ROI, Annualized ROI, Capital Days, Profit / Capital-Day, Max Buy, and
-    Required Negotiation calculations; DOWNSIDE/BASE/UPSIDE scenarios; and
-    tests for fixed costs, percentage costs, zero/negative margin, Max Buy,
-    required negotiation, ROI, annualized ROI, scenario differences, invalid
-    inputs, and Decimal precision.
+    Implement the minimal Phase 10 rules-based opportunity and alert flow:
+    opportunity_assessments and alerts persistence; IGNORE/WATCH/REVIEW/CALL/
+    URGENT_CALL decisions; hard-gate checks before scoring; simple explainable
+    ranking from existing deal/risk/liquidity/seller metrics; conservative
+    no-qualifying-opportunities behavior; Telegram sender abstraction with
+    mocked tests; alert dedupe; concise message content; and property deep link.
 
 Do not implement:
 
-- opportunity scoring;
-- opportunity alerts;
-- Telegram alerts;
-- action queue or ranking;
-- frontend deal/opportunity UI beyond what Phase 9 explicitly requires;
-- LLM-based financial calculations;
+- Phase 11 dashboard/action queue UI;
+- production manual-call workflow;
+- portfolio/transaction import;
+- multi-channel notification infrastructure;
 - additional markets or sources.
 
 ## Required Context
@@ -148,39 +152,33 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 9 - Deal Engine & Investment Profiles
+    -> PHASE 10 - Opportunity Engine & Telegram Alerts
 
 Relevant specification sections only:
 
+    docs/01-product-specification.md
+    -> Action Queue
+    -> Alert philosophy
+    -> Telegram
+
     docs/03-data-model.md
-    -> cost_profiles
-    -> investment_profiles
-    -> deal_analyses
-    -> deal_scenarios
+    -> opportunity_assessments
+    -> alerts
 
     docs/05-analysis-specification.md
-    -> Deal Engine
-    -> Cost Profiles
-    -> Total Cost Basis
-    -> Net Profit
-    -> ROI
-    -> Capital Days
-    -> Risk Reserve
-    -> Max Buy Price
-    -> Required Negotiation
-    -> Deal Scenarios
+    -> Opportunity Assessment
+    -> Hard Conditions
+    -> Recommended Actions
+    -> Hard Gate
+    -> Ranking
+    -> No-Deal Behavior
+
+    docs/06-api-ui-specification.md
+    -> decision summary
+    -> Telegram deep link
 
     docs/08-testing-specification.md
-    -> Deal Engine
-    -> Fixed-Cost Deal
-    -> Percentage Costs
-    -> Max Buy Solver
-    -> Max Buy Monotonicity
-    -> Required Negotiation
-    -> Scenario Ordering
-    -> Invalid Deal Input
-    -> Annualized ROI
-    -> Phase 9
+    -> Phase 10 opportunity and Telegram tests
 
 Existing implementation to inspect:
 
@@ -190,25 +188,24 @@ Existing implementation to inspect:
     backend/app/valuation/
     backend/app/liquidity/
     backend/app/intelligence/
+    backend/app/deals/
     backend/tests/
 
-Do not load later-phase specifications unless a concrete Phase 9 dependency requires them.
+Do not load later-phase specifications unless a concrete Phase 10 dependency requires them.
 
-## Phase 9 Completion Gate
+## Phase 10 Completion Gate
 
-Phase 9 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
+Phase 10 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
 
 At minimum verify:
 
-- fixed and percentage costs;
-- Total Cost Basis, Net Profit, ROI, Annualized ROI, Capital Days, Profit / Capital-Day;
-- Max Buy when costs depend on purchase price;
-- Required Negotiation never goes negative;
-- DOWNSIDE/BASE/UPSIDE scenario behavior;
-- zero/negative margin and invalid input handling;
-- Decimal precision.
+- a test/new property can pass ingestion -> property -> analysis -> deal -> opportunity -> alert without manual intervention;
+- unchanged opportunity state does not send the same alert again;
+- hard `BLOCK` cannot be overridden by opportunity score;
+- Telegram provider is mocked in automated tests;
+- `NO QUALIFYING OPPORTUNITIES` is a valid result.
 
-Do not implement Phase 10 opportunity scoring or alerts.
+Do not implement Phase 11 dashboard UI.
 
 ## Update Rules
 
