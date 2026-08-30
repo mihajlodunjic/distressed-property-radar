@@ -1,6 +1,13 @@
+x-dpr-logging: &dpr-logging
+  driver: json-file
+  options:
+    max-size: "${DPR_LOG_MAX_SIZE:-10m}"
+    max-file: "${DPR_LOG_MAX_FILES:-5}"
+
 services:
   postgres:
     image: postgis/postgis:16-3.5
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${DPR_POSTGRES_DB:-distressed_property_radar}
       POSTGRES_TEST_DB: ${DPR_POSTGRES_TEST_DB:-distressed_property_radar_test}
@@ -16,6 +23,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging: *dpr-logging
 
 volumes:
   postgres_data:

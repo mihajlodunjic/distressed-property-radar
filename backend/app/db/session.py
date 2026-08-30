@@ -21,6 +21,7 @@ def get_engine() -> Engine:
         pool_pre_ping=True,
         pool_size=settings.database_pool_size,
         max_overflow=settings.database_max_overflow,
+        connect_args={"connect_timeout": settings.database_connect_timeout_seconds},
     )
 
 

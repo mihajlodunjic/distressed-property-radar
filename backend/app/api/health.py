@@ -5,8 +5,19 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.db.session import database_is_reachable, get_postgis_version
+from app.operations.status import build_readiness_report
 
 router = APIRouter()
+
+
+@router.get("/live")
+def live() -> dict[str, object]:
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "environment": settings.app_env,
+        "release": {"app_version": settings.app_version},
+    }
 
 
 @router.get("/health")
@@ -28,4 +39,15 @@ def health() -> JSONResponse:
                 "version": postgis_version,
             },
         },
+    )
+
+
+@router.get("/ready")
+def ready() -> JSONResponse:
+    readiness = build_readiness_report()
+    return JSONResponse(
+        status_code=status.HTTP_200_OK
+        if readiness["ready"]
+        else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=readiness,
     )

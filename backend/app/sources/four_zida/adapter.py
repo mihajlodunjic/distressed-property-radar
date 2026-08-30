@@ -46,7 +46,18 @@ class FourZidaConfig:
     timeout_seconds: float = 20.0
     retry_count: int = 2
     min_request_delay_seconds: float = 0.2
+    max_concurrency: int = 1
     user_agent: str = "DistressedPropertyRadar/0.1 (+private research crawler)"
+
+    def __post_init__(self) -> None:
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        if self.retry_count < 0:
+            raise ValueError("retry_count must be non-negative")
+        if self.min_request_delay_seconds < 0:
+            raise ValueError("min_request_delay_seconds must be non-negative")
+        if self.max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least 1")
 
 
 @dataclass(frozen=True)

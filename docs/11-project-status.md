@@ -8,11 +8,11 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 14 - Reliability, Monitoring & Production Hardening
-    Current task: Phase 14 - implement reliability, monitoring, and production-hardening foundation
+    Current phase: PHASE 15 - Second Source & Cross-Portal Validation
+    Current task: Phase 15 - implement second source adapter and cross-portal validation foundation
     Task state: READY
 
-Phase 13 is complete.
+Phase 14 is complete.
 
 ## Completed Phases
 
@@ -30,20 +30,30 @@ Phase 13 is complete.
     PHASE 11 - First Usable Dashboard: COMPLETED
     PHASE 12 - Watchlist, Reanalysis & Change Intelligence: COMPLETED
     PHASE 13 - Acquisition CRM & Human Feedback: COMPLETED
+    PHASE 14 - Reliability, Monitoring & Production Hardening: COMPLETED
 
 ## Completed Tasks
 
-- Phase 13 acquisition CRM and human feedback is implemented and verified: workflow persistence, pipeline commands, reviews, call/visit feedback, offers, skips, outcomes, manual overrides, manual feedback precedence, selective downstream reanalysis, API/UI integration, and backend/frontend tests/checks.
+- Phase 14 reliability and production hardening is implemented and verified: live/readiness/operations status, request logging, bounded DB failure behavior, stale-job recovery, source/provider failure isolation, single-owner worker loop, backup/restore workflow, raw-record retention guardrails, operational alerts, Docker restart/log settings, and backend/frontend/runtime checks.
 
 ## Current Implementation Facts
 
 - Backend: FastAPI application exists under `backend/app`.
 - Backend configuration: centralized settings in `backend/app/core/config.py`, loaded from environment variables and optional root `.env`.
-- Backend logging: basic startup logging exists and does not log secrets.
+- Backend logging: centralized text/JSON logging exists with optional rotating file output, request IDs, request timing logs, startup environment/app-version/process/DB-reachability fields, and no secret logging.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
 - Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, `RiskGateEffect`, `DealAnalysisStatus`, `DealScenarioType`, `OpportunityAction`, `AlertChannel`, `AlertType`, `AlertStatus`, `WatchRuleType`, `AnalysisStatus`, `PropertyReviewDecision`, `InteractionType`, `OfferStatus`, `SkipReasonCode`, and `PropertyOutcomeType` exist in `backend/app/domain/enums.py`.
 - ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, `CostProfile`, `InvestmentProfile`, `DealAnalysis`, `DealScenario`, `OpportunityAssessment`, `Alert`, `PropertyAnalysisState`, `WatchRule`, `WatchTriggerEvent`, `JobRun`, `PropertyReview`, `Interaction`, `CallFeedback`, `VisitFeedback`, `Offer`, `SkipRecord`, `PropertyOutcome`, `PropertyOverride`, and `PipelineStatusEvent` exist in `backend/app/db/models.py`.
 - Migrations: Alembic is configured; current head is `0013_acquisition_crm`.
+- Runtime health: `GET /live` reports process liveness, `GET /health` checks PostgreSQL/PostGIS, and `GET /ready` checks database, PostGIS, Alembic head, and blocking production configuration.
+- Operations status: `GET /api/v1/operations/status` and `python -m app.operations.status` report readiness, scheduler ownership, database/disk metrics, backup state, source health, job health, analysis state, and alert queues.
+- Worker runtime: `python -m app.operations.worker` provides the single-owner background worker loop and one-shot smoke mode; API runtime does not run the scheduler implicitly.
+- Job recovery: stale `RUNNING` job recovery marks jobs `FAILED`, records an explicit recovery summary, degrades affected source runtime state, and does not alter listing lifecycle/history or manual data.
+- Operational alerts: source-health and stale-job alerts are persisted through the existing `alerts` table with cooldown/dedupe behavior separate from opportunity alerts.
+- Backup/restore: `python -m app.operations.backup` supports custom-format `pg_dump`, retention pruning of owned backup files, restore, and restore verification against a non-production target database without putting DB passwords in command arguments.
+- Raw retention: raw listing payload retention is explicit, dry-run by default, and only prunes `listing_raw_records`; listings, events, properties, analysis history, and manual workflow data are not pruned.
+- Docker Compose: PostgreSQL keeps a persistent named volume, restart policy, and bounded Docker log rotation.
+- Reliability config: environment settings include bounded database connect timeout, source request timeout/retry/delay/concurrency/page limits, stale-job timeout, stale-source threshold, backup directory/retention/off-server flag, worker poll interval, and log rotation values.
 - Bootstrap sources: migrations seed stable `manual` and `four_zida` sources with `source_runtime_state` rows.
 - Critical listing invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
 - `listing_raw_records` stores deduped CARD/DETAIL raw payloads by listing, record type, and content hash.
@@ -137,8 +147,9 @@ Phase 13 is complete.
 - Backend tests also cover Phase 11 private API auth, Action Queue contract, empty queue, no obvious Action Queue N+1 query pattern, Property Detail UNKNOWN/STALE/BLOCK/history/analysis sections, Source Health, Settings secrecy, and `/api/v1/health`.
 - Backend tests also cover Phase 12 watch-rule persistence/API, Watchlist API, trigger dedupe, selective price/description/seller invalidation, historical reanalysis preservation, Watch-to-CALL upgrade, fresh deal-based Telegram alert decisions, and manual reanalysis queue response.
 - Backend tests also cover Phase 13 acquisition workflow table creation, alert-to-review-call-visit-offer-outcome flow, pipeline API, validation/not-found cases, manual call precedence, verified visit overrides, feedback-triggered reanalysis, skip atomicity, and separate historical persistence tables.
+- Backend tests also cover Phase 14 liveness/readiness, production fail-closed readiness, request IDs, private operations status, stale-job recovery idempotency, source-health alert dedupe, backup/restore command construction, backup retention, raw-record retention safety, and bounded failure reporting.
 - Frontend tests cover UNKNOWN rendering, critical status formatting for STALE/FAILED/BLOCK, and watch-trigger formatting. Frontend build/typecheck is configured through `npm run build`; no separate frontend lint script exists.
-- Health endpoints: `GET /health` and `GET /api/v1/health` check application process, PostgreSQL connectivity, and PostGIS availability.
+- Health endpoints: `GET /live` and `GET /api/v1/live` check process liveness; `GET /health` and `GET /api/v1/health` check application process, PostgreSQL connectivity, and PostGIS availability; `GET /ready` and `GET /api/v1/ready` check database, PostGIS, migrations, and blocking production config.
 - Frontend: Vite React dashboard exists under `frontend`.
 - `.env.example` documents required variable names with local-only example values and no real secrets, including empty `API_ACCESS_TOKEN`, `LLM_API_KEY`, Telegram token/chat values, and configured CORS origin names.
 - Production deployment: none.
@@ -163,18 +174,17 @@ Phase 13 is complete.
 
 Implement only:
 
-    PHASE 14 - Reliability, Monitoring & Production Hardening
+    PHASE 15 - Second Source & Cross-Portal Validation
 
 Exact first logical task:
 
-    Implement the reliability and recovery foundation for current API, crawler,
-    analysis, Telegram, and database workflows: restart safety, outage handling,
-    source/job health hardening, backup/restore workflow, log retention, security,
-    resource limits, and practical integration tests/documentation.
+    Implement the second source adapter foundation without duplicating the
+    ingestion pipeline: add the second-source fixtures/parser/adapter, persist
+    listings through the existing shared model, and verify cross-source property
+    matching for the same physical property across two portals.
 
 Do not implement:
 
-- Phase 15 second-source/cross-portal validation;
 - Phase 16 historical evaluation or shadow portfolio;
 - Phase 17 transaction data enrichment;
 - new market expansion;
@@ -189,58 +199,50 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 14 - Reliability, Monitoring & Production Hardening
+    -> PHASE 15 - Second Source & Cross-Portal Validation
 
 Relevant specification sections only:
 
-    docs/09-deployment-operations.md
-    -> runtime/process management
-    -> backups and restore
-    -> logging/retention
-    -> security/configuration
+    docs/02-system-architecture.md
+    -> Source Adapter
+    -> module boundaries
+    -> matching
+
+    docs/03-data-model.md
+    -> Listing vs Property
+    -> matching history
+    -> provenance
+    -> images, if used
 
     docs/04-scraping-specification.md
-    -> Source Health
-    -> failure isolation
-    -> recovery
-    -> anomaly handling
+    -> adapter contract
+    -> adding a new source
+    -> source reliability
+
+    docs/09-deployment-operations.md
+    -> source/worker reliability constraints that affect new adapters
 
     docs/08-testing-specification.md
-    -> reliability
-    -> recovery
-    -> integration tests
+    -> Phase 15 second-source adapter fixtures
+    -> shared ingestion regressions
+    -> cross-source matching tests
 
 Existing implementation to inspect:
 
-    backend/app/api/
     backend/app/db/models.py
-    backend/app/analysis/
-    backend/app/crawling/
     backend/app/ingestion/
-    backend/app/intelligence/
-    backend/app/opportunities/
-    backend/app/watchlist/
-    frontend/
-    backend/tests/
+    backend/app/sources/four_zida/
+    backend/app/matching/property_resolution.py
+    backend/app/locations/
+    backend/tests/fixtures/four_zida/
+    backend/tests/test_four_zida_*.py
+    backend/tests/test_property_resolution.py
 
-Do not load Phase 15+ specifications unless a concrete Phase 14 dependency requires them.
+Do not load Phase 16+ specifications unless a concrete Phase 15 dependency requires them.
 
-## Phase 14 Completion Gate
+## Phase 15 Scope Guard
 
-Phase 14 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
-
-At minimum verify:
-
-- API restart safety;
-- worker/crawler restart safety;
-- temporary DB failure handling;
-- temporary source outage handling;
-- LLM outage handling;
-- Telegram outage handling;
-- recovery behavior is documented and tested where practical;
-- backup/restore workflow is implemented or clearly documented per Phase 14 scope.
-
-Do not implement Phase 15 second-source behavior.
+Phase 15 is about adding a second source through the existing source adapter and ingestion boundaries, then proving cross-portal property identity. Do not implement historical evaluation/shadow portfolio or transaction-data enrichment.
 
 ## Update Rules
 

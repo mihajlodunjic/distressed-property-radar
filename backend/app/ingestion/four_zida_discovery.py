@@ -1348,6 +1348,7 @@ def _mode_from_cli(value: str) -> CrawlMode:
 def _main() -> None:
     from app.db.session import SessionLocal
 
+    settings = get_settings()
     parser = argparse.ArgumentParser(description="Run 4zida crawler.")
     parser.add_argument(
         "--mode",
@@ -1381,7 +1382,13 @@ def _main() -> None:
     args = parser.parse_args()
 
     mode = _mode_from_cli(args.mode)
-    config = FourZidaConfig(search_urls=_market_urls(args.market or ["all"]))
+    config = FourZidaConfig(
+        search_urls=_market_urls(args.market or ["all"]),
+        timeout_seconds=settings.four_zida_timeout_seconds,
+        retry_count=settings.four_zida_retry_count,
+        min_request_delay_seconds=settings.four_zida_min_request_delay_seconds,
+        max_concurrency=settings.four_zida_max_concurrency,
+    )
     with SessionLocal() as session:
         adapter = FourZidaAdapter(config=config)
         if args.iterations == 1:

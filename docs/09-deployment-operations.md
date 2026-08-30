@@ -1959,6 +1959,45 @@ Kada stvarna implementacija postoji, README ili kratki operations deo treba da d
     worker restart
     status/health
 
+Trenutne V1 komande koje postoje u repozitorijumu:
+
+```powershell
+# local infrastructure
+docker compose up -d postgres
+docker compose ps
+
+# migrations, from backend/
+.\.venv\Scripts\alembic.exe upgrade head
+
+# API startup, from backend/
+.\.venv\Scripts\uvicorn.exe app.main:app --host 127.0.0.1 --port 8000
+
+# health/readiness
+curl.exe -i http://127.0.0.1:8000/health
+curl.exe -i http://127.0.0.1:8000/ready
+
+# private operations status, from backend API
+curl.exe -i http://127.0.0.1:8000/api/v1/operations/status
+
+# worker one-shot smoke without live source access, from backend/
+.\.venv\Scripts\python.exe -m app.operations.worker --once --skip-crawl
+
+# worker loop, from backend/
+.\.venv\Scripts\python.exe -m app.operations.worker --send-alerts
+
+# 4zida controlled crawl, from backend/
+.\.venv\Scripts\python.exe -m app.ingestion.four_zida_discovery --mode fast-discovery --max-pages-per-market 1
+
+# database backup, from backend/
+.\.venv\Scripts\python.exe -m app.operations.backup create
+
+# restore verification must use an empty non-production database
+.\.venv\Scripts\python.exe -m app.operations.backup verify-restore .\backups\dpr-postgres-YYYYMMDDTHHMMSSZ.dump --database-url "<restore-test-database-url>"
+```
+
+Production deployment i restore komande moraju koristiti production `.env`/secrets i ne smeju
+restore test izvrsavati preko production baze.
+
 Ne izmišljati komande pre nego što service/file names stvarno postoje.
 
 
