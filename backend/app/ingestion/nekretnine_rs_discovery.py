@@ -26,27 +26,33 @@ from app.ingestion.source_crawl import (
     run_source_discovery_async,
 )
 from app.sources.adapter_contract import ListingSourceAdapter
-from app.sources.four_zida.adapter import DEFAULT_SEARCH_URLS, FourZidaAdapter, FourZidaConfig
-from app.sources.four_zida.parser import PARSER_VERSION
+from app.sources.nekretnine_rs.adapter import (
+    DEFAULT_SEARCH_URLS,
+    NekretnineRsAdapter,
+    NekretnineRsConfig,
+)
+from app.sources.nekretnine_rs.parser import BASE_URL, PARSER_VERSION
 
-FOUR_ZIDA_SOURCE_CODE = "four_zida"
-FOUR_ZIDA_BASE_URL = "https://www.4zida.rs"
+NEKRETNINE_RS_SOURCE_CODE = "nekretnine_rs"
+NEKRETNINE_RS_BASE_URL = BASE_URL
 
 
-def make_four_zida_definition(config: FourZidaConfig | None = None) -> SourceCrawlDefinition:
+def make_nekretnine_rs_definition(
+    config: NekretnineRsConfig | None = None,
+) -> SourceCrawlDefinition:
     return SourceCrawlDefinition(
-        code=FOUR_ZIDA_SOURCE_CODE,
-        name="4zida",
-        base_url=FOUR_ZIDA_BASE_URL,
+        code=NEKRETNINE_RS_SOURCE_CODE,
+        name="Nekretnine.rs",
+        base_url=NEKRETNINE_RS_BASE_URL,
         parser_version=PARSER_VERSION,
-        make_adapter=lambda: FourZidaAdapter(config=config),
+        make_adapter=lambda: NekretnineRsAdapter(config=config),
     )
 
 
-FOUR_ZIDA_DEFINITION = make_four_zida_definition()
+NEKRETNINE_RS_DEFINITION = make_nekretnine_rs_definition()
 
 
-async def run_four_zida_crawl_async(
+async def run_nekretnine_rs_crawl_async(
     session: Session,
     *,
     mode: CrawlMode = CrawlMode.FAST_DISCOVERY,
@@ -61,7 +67,7 @@ async def run_four_zida_crawl_async(
 ) -> IngestionSummary:
     return await run_source_crawl_async(
         session,
-        definition=FOUR_ZIDA_DEFINITION,
+        definition=NEKRETNINE_RS_DEFINITION,
         mode=mode,
         job_type=job_type,
         adapter=adapter,
@@ -74,7 +80,7 @@ async def run_four_zida_crawl_async(
     )
 
 
-async def run_four_zida_discovery_async(
+async def run_nekretnine_rs_discovery_async(
     session: Session,
     *,
     adapter: ListingSourceAdapter | None = None,
@@ -84,7 +90,7 @@ async def run_four_zida_discovery_async(
 ) -> IngestionSummary:
     return await run_source_discovery_async(
         session,
-        definition=FOUR_ZIDA_DEFINITION,
+        definition=NEKRETNINE_RS_DEFINITION,
         adapter=adapter,
         max_pages_per_market=max_pages_per_market,
         detail_limit=detail_limit,
@@ -92,7 +98,7 @@ async def run_four_zida_discovery_async(
     )
 
 
-def run_four_zida_discovery(
+def run_nekretnine_rs_discovery(
     session: Session,
     *,
     adapter: ListingSourceAdapter | None = None,
@@ -102,7 +108,7 @@ def run_four_zida_discovery(
 ) -> IngestionSummary:
     return run_source_discovery(
         session,
-        definition=FOUR_ZIDA_DEFINITION,
+        definition=NEKRETNINE_RS_DEFINITION,
         adapter=adapter,
         max_pages_per_market=max_pages_per_market,
         detail_limit=detail_limit,
@@ -110,7 +116,7 @@ def run_four_zida_discovery(
     )
 
 
-def run_four_zida_crawl(
+def run_nekretnine_rs_crawl(
     session: Session,
     *,
     mode: CrawlMode = CrawlMode.FAST_DISCOVERY,
@@ -124,7 +130,7 @@ def run_four_zida_crawl(
 ) -> IngestionSummary:
     return run_source_crawl(
         session,
-        definition=FOUR_ZIDA_DEFINITION,
+        definition=NEKRETNINE_RS_DEFINITION,
         mode=mode,
         adapter=adapter,
         max_pages_per_market=max_pages_per_market,
@@ -136,7 +142,7 @@ def run_four_zida_crawl(
     )
 
 
-async def run_scheduled_four_zida_crawl_async(
+async def run_scheduled_nekretnine_rs_crawl_async(
     session: Session,
     *,
     mode: CrawlMode = CrawlMode.FAST_DISCOVERY,
@@ -151,7 +157,7 @@ async def run_scheduled_four_zida_crawl_async(
 ) -> IngestionSummary | None:
     return await run_scheduled_source_crawl_async(
         session,
-        definition=FOUR_ZIDA_DEFINITION,
+        definition=NEKRETNINE_RS_DEFINITION,
         mode=mode,
         interval_seconds=interval_seconds,
         adapter=adapter,
@@ -164,7 +170,7 @@ async def run_scheduled_four_zida_crawl_async(
     )
 
 
-def run_scheduled_four_zida_crawl(
+def run_scheduled_nekretnine_rs_crawl(
     session: Session,
     *,
     mode: CrawlMode = CrawlMode.FAST_DISCOVERY,
@@ -179,7 +185,7 @@ def run_scheduled_four_zida_crawl(
 ) -> IngestionSummary | None:
     return run_scheduled_source_crawl(
         session,
-        definition=FOUR_ZIDA_DEFINITION,
+        definition=NEKRETNINE_RS_DEFINITION,
         mode=mode,
         interval_seconds=interval_seconds,
         adapter=adapter,
@@ -192,11 +198,11 @@ def run_scheduled_four_zida_crawl(
     )
 
 
-def ensure_four_zida_source(session: Session) -> Source:
-    return ensure_source(session, FOUR_ZIDA_DEFINITION)
+def ensure_nekretnine_rs_source(session: Session) -> Source:
+    return ensure_source(session, NEKRETNINE_RS_DEFINITION)
 
 
-async def run_four_zida_crawl_loop_async(
+async def run_nekretnine_rs_crawl_loop_async(
     session: Session,
     *,
     mode: CrawlMode = CrawlMode.FAST_DISCOVERY,
@@ -211,7 +217,7 @@ async def run_four_zida_crawl_loop_async(
 ) -> list[IngestionSummary]:
     return await run_source_crawl_loop_async(
         session,
-        definition=FOUR_ZIDA_DEFINITION,
+        definition=NEKRETNINE_RS_DEFINITION,
         mode=mode,
         iterations=iterations,
         interval_seconds=interval_seconds,
@@ -224,7 +230,7 @@ async def run_four_zida_crawl_loop_async(
     )
 
 
-def run_four_zida_crawl_loop(
+def run_nekretnine_rs_crawl_loop(
     session: Session,
     *,
     mode: CrawlMode = CrawlMode.FAST_DISCOVERY,
@@ -239,7 +245,7 @@ def run_four_zida_crawl_loop(
 ) -> list[IngestionSummary]:
     return run_source_crawl_loop(
         session,
-        definition=FOUR_ZIDA_DEFINITION,
+        definition=NEKRETNINE_RS_DEFINITION,
         mode=mode,
         iterations=iterations,
         interval_seconds=interval_seconds,
@@ -257,9 +263,15 @@ def _market_urls(markets: list[str]) -> tuple[str, ...]:
         return DEFAULT_SEARCH_URLS
     urls: list[str] = []
     if "zemun" in markets:
-        urls.append("https://www.4zida.rs/prodaja-stanova/zemun-opstina-beograd?m2From=35&m2To=90")
+        urls.append(
+            "https://www.nekretnine.rs/stambeni-objekti/stanovi/beograd-zemun/prodaja/"
+            "?kvadratura_min=35&kvadratura_max=90"
+        )
     if "novi-beograd" in markets:
-        urls.append("https://www.4zida.rs/prodaja-stanova/novi-beograd-beograd?m2From=35&m2To=90")
+        urls.append(
+            "https://www.nekretnine.rs/stambeni-objekti/stanovi/beograd-novi-beograd/prodaja/"
+            "?kvadratura_min=35&kvadratura_max=90"
+        )
     return tuple(urls)
 
 
@@ -271,7 +283,7 @@ def _main() -> None:
     from app.db.session import SessionLocal
 
     settings = get_settings()
-    parser = argparse.ArgumentParser(description="Run 4zida crawler.")
+    parser = argparse.ArgumentParser(description="Run Nekretnine.rs crawler.")
     parser.add_argument(
         "--mode",
         choices=["fast-discovery", "active-market-scan", "deep-reconciliation"],
@@ -304,16 +316,16 @@ def _main() -> None:
     args = parser.parse_args()
 
     mode = _mode_from_cli(args.mode)
-    config = FourZidaConfig(
+    config = NekretnineRsConfig(
         search_urls=_market_urls(args.market or ["all"]),
-        timeout_seconds=settings.four_zida_timeout_seconds,
-        retry_count=settings.four_zida_retry_count,
-        min_request_delay_seconds=settings.four_zida_min_request_delay_seconds,
-        max_concurrency=settings.four_zida_max_concurrency,
+        timeout_seconds=settings.nekretnine_rs_timeout_seconds,
+        retry_count=settings.nekretnine_rs_retry_count,
+        min_request_delay_seconds=settings.nekretnine_rs_min_request_delay_seconds,
+        max_concurrency=settings.nekretnine_rs_max_concurrency,
     )
-    definition = make_four_zida_definition(config)
+    definition = make_nekretnine_rs_definition(config)
     with SessionLocal() as session:
-        adapter = FourZidaAdapter(config=config)
+        adapter = NekretnineRsAdapter(config=config)
         if args.iterations == 1:
             summary = run_source_crawl(
                 session,

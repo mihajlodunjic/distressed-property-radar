@@ -82,6 +82,23 @@ class Settings(BaseSettings):
         default=1,
         alias="FOUR_ZIDA_MAX_PAGES_PER_MARKET",
     )
+    nekretnine_rs_timeout_seconds: float = Field(
+        default=20.0,
+        alias="NEKRETNINE_RS_TIMEOUT_SECONDS",
+    )
+    nekretnine_rs_retry_count: int = Field(default=2, alias="NEKRETNINE_RS_RETRY_COUNT")
+    nekretnine_rs_min_request_delay_seconds: float = Field(
+        default=0.2,
+        alias="NEKRETNINE_RS_MIN_REQUEST_DELAY_SECONDS",
+    )
+    nekretnine_rs_max_concurrency: int = Field(
+        default=1,
+        alias="NEKRETNINE_RS_MAX_CONCURRENCY",
+    )
+    nekretnine_rs_max_pages_per_market: int = Field(
+        default=1,
+        alias="NEKRETNINE_RS_MAX_PAGES_PER_MARKET",
+    )
 
     model_config = SettingsConfigDict(
         env_file=str(_REPOSITORY_ROOT / ".env"),

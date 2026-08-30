@@ -8,11 +8,11 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 15 - Second Source & Cross-Portal Validation
-    Current task: Phase 15 - implement second source adapter and cross-portal validation foundation
+    Current phase: PHASE 16 - Historical Evaluation & Shadow Portfolio
+    Current task: Phase 16 - implement historical as-of evaluation and shadow-deal foundation
     Task state: READY
 
-Phase 14 is complete.
+Phase 15 is complete.
 
 ## Completed Phases
 
@@ -31,10 +31,11 @@ Phase 14 is complete.
     PHASE 12 - Watchlist, Reanalysis & Change Intelligence: COMPLETED
     PHASE 13 - Acquisition CRM & Human Feedback: COMPLETED
     PHASE 14 - Reliability, Monitoring & Production Hardening: COMPLETED
+    PHASE 15 - Second Source & Cross-Portal Validation: COMPLETED
 
 ## Completed Tasks
 
-- Phase 14 reliability and production hardening is implemented and verified: live/readiness/operations status, request logging, bounded DB failure behavior, stale-job recovery, source/provider failure isolation, single-owner worker loop, backup/restore workflow, raw-record retention guardrails, operational alerts, Docker restart/log settings, and backend/frontend/runtime checks.
+- Phase 15 second-source and cross-portal validation is implemented and verified: shared source crawl persistence, Nekretnine.rs adapter/parser/fixtures, second-source seeding/config/CLI, worker scheduling for both sources, cross-source listing/property matching, lifecycle/outage safety, independent listing histories, and backend/frontend/runtime checks.
 
 ## Current Implementation Facts
 
@@ -44,28 +45,34 @@ Phase 14 is complete.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
 - Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, `RiskGateEffect`, `DealAnalysisStatus`, `DealScenarioType`, `OpportunityAction`, `AlertChannel`, `AlertType`, `AlertStatus`, `WatchRuleType`, `AnalysisStatus`, `PropertyReviewDecision`, `InteractionType`, `OfferStatus`, `SkipReasonCode`, and `PropertyOutcomeType` exist in `backend/app/domain/enums.py`.
 - ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, `CostProfile`, `InvestmentProfile`, `DealAnalysis`, `DealScenario`, `OpportunityAssessment`, `Alert`, `PropertyAnalysisState`, `WatchRule`, `WatchTriggerEvent`, `JobRun`, `PropertyReview`, `Interaction`, `CallFeedback`, `VisitFeedback`, `Offer`, `SkipRecord`, `PropertyOutcome`, `PropertyOverride`, and `PipelineStatusEvent` exist in `backend/app/db/models.py`.
-- Migrations: Alembic is configured; current head is `0013_acquisition_crm`.
+- Migrations: Alembic is configured; current head is `0014_second_source_nekretnine_rs`.
 - Runtime health: `GET /live` reports process liveness, `GET /health` checks PostgreSQL/PostGIS, and `GET /ready` checks database, PostGIS, Alembic head, and blocking production configuration.
 - Operations status: `GET /api/v1/operations/status` and `python -m app.operations.status` report readiness, scheduler ownership, database/disk metrics, backup state, source health, job health, analysis state, and alert queues.
-- Worker runtime: `python -m app.operations.worker` provides the single-owner background worker loop and one-shot smoke mode; API runtime does not run the scheduler implicitly.
+- Worker runtime: `python -m app.operations.worker` provides the single-owner background worker loop and one-shot smoke mode, schedules 4zida and Nekretnine.rs independently, and keeps API runtime from running the scheduler implicitly.
 - Job recovery: stale `RUNNING` job recovery marks jobs `FAILED`, records an explicit recovery summary, degrades affected source runtime state, and does not alter listing lifecycle/history or manual data.
 - Operational alerts: source-health and stale-job alerts are persisted through the existing `alerts` table with cooldown/dedupe behavior separate from opportunity alerts.
 - Backup/restore: `python -m app.operations.backup` supports custom-format `pg_dump`, retention pruning of owned backup files, restore, and restore verification against a non-production target database without putting DB passwords in command arguments.
 - Raw retention: raw listing payload retention is explicit, dry-run by default, and only prunes `listing_raw_records`; listings, events, properties, analysis history, and manual workflow data are not pruned.
 - Docker Compose: PostgreSQL keeps a persistent named volume, restart policy, and bounded Docker log rotation.
 - Reliability config: environment settings include bounded database connect timeout, source request timeout/retry/delay/concurrency/page limits, stale-job timeout, stale-source threshold, backup directory/retention/off-server flag, worker poll interval, and log rotation values.
-- Bootstrap sources: migrations seed stable `manual` and `four_zida` sources with `source_runtime_state` rows.
+- Bootstrap sources: migrations seed stable `manual`, `four_zida`, and `nekretnine_rs` sources with `source_runtime_state` rows.
 - Critical listing invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
 - `listing_raw_records` stores deduped CARD/DETAIL raw payloads by listing, record type, and content hash.
 - `listings` keeps lifecycle state including `ACTIVE`, `NOT_SEEN`, `REMOVED`, timestamps, state hashes, and `consecutive_not_seen_count`.
 - `source_runtime_state` tracks source health, last success/attempt, mode-specific success timestamps, recent HTTP/parse errors, and zero-result anomalies.
 - `job_runs` records crawl metrics including pages requested, cards seen/parsed, new/changed listings, not-seen count, details fetched, parse errors, and HTTP errors.
-- First source: `backend/app/sources/four_zida` implements an HTTP-first 4zida adapter.
+- Shared source ingestion: `backend/app/ingestion/source_crawl.py` owns source-neutral crawl persistence, raw-record dedupe, source health, job summaries, lifecycle safety, and detail reconciliation.
+- Source DTO/adapter contract: `backend/app/sources/dto.py` and `backend/app/sources/adapter_contract.py` define shared raw card/detail DTOs, discovery results, and fetch-error classification.
+- First source: `backend/app/sources/four_zida` implements an HTTP-first 4zida adapter and now uses shared crawl persistence through `backend/app/ingestion/four_zida_discovery.py` compatibility wrappers.
 - 4zida discovery uses current target-market URLs for Zemun and Novi Beograd apartment sales with `m2From=35&m2To=90`.
 - 4zida adapter supports pagination, known-listing boundary stopping, mocked/live HTTP, retry/error classification, and detail fetch.
 - 4zida parser reads server-rendered JSON-LD ItemList/detail objects and falls back to listing links for identity only.
 - 4zida crawler modes exist: `FAST_DISCOVERY`, `ACTIVE_MARKET_SCAN`, and `DEEP_RECONCILIATION`.
 - CLI command: run from `backend` with `.\.venv\Scripts\python.exe -m app.ingestion.four_zida_discovery --mode fast-discovery --max-pages-per-market 1`.
+- Second source: `backend/app/sources/nekretnine_rs` implements an HTTP-first Nekretnine.rs adapter with source-specific URL canonicalization, pagination, duplicate-card dedupe, retry/error classification, and parser fixtures.
+- Nekretnine.rs discovery uses current target-market URLs for Zemun and Novi Beograd apartment sales with `kvadratura_min=35&kvadratura_max=90`.
+- Nekretnine.rs parser reads source HTML card attributes and JSON-LD/detail fallback data into the shared raw listing DTOs while preserving source meaning.
+- Nekretnine.rs CLI command: run from `backend` with `.\.venv\Scripts\python.exe -m app.ingestion.nekretnine_rs_discovery --mode fast-discovery --max-pages-per-market 1`.
 - Fast discovery persists new listings and refreshes known listings without duplicate business events.
 - Active market scan refreshes card observations, detects price changes, and only marks missing listings from complete non-anomalous scans.
 - Deep reconciliation confirms `NOT_SEEN` listings and records `REMOVED` only on explicit 404/410 detail confirmation.
@@ -74,6 +81,7 @@ Phase 14 is complete.
 - Matching module: `backend/app/matching/property_resolution.py` implements deterministic `deterministic_v1` property resolution without ML.
 - Matching uses cheap candidate filters before scoring; it does not evaluate every listing against every property.
 - Matching scores location, size, rooms, floor, and text signals; hard structured conflicts are rejected instead of forced into possible matches.
+- Cross-source matching can automatically link obvious same-property listings across portals when high-confidence structured signals are exact/near-exact even if title/agency/price differ; missing-floor or otherwise uncertain cases remain pending candidates.
 - `listings.property_id` stores the current canonical property link.
 - `property_listing_links` preserves match provenance/history for automatic, manual, and new-property decisions.
 - `property_match_candidates` stores uncertain/rejected candidate state for review and idempotent reruns.
@@ -148,6 +156,7 @@ Phase 14 is complete.
 - Backend tests also cover Phase 12 watch-rule persistence/API, Watchlist API, trigger dedupe, selective price/description/seller invalidation, historical reanalysis preservation, Watch-to-CALL upgrade, fresh deal-based Telegram alert decisions, and manual reanalysis queue response.
 - Backend tests also cover Phase 13 acquisition workflow table creation, alert-to-review-call-visit-offer-outcome flow, pipeline API, validation/not-found cases, manual call precedence, verified visit overrides, feedback-triggered reanalysis, skip atomicity, and separate historical persistence tables.
 - Backend tests also cover Phase 14 liveness/readiness, production fail-closed readiness, request IDs, private operations status, stale-job recovery idempotency, source-health alert dedupe, backup/restore command construction, backup retention, raw-record retention safety, and bounded failure reporting.
+- Backend tests also cover Phase 15 Nekretnine.rs parser/adapter fixtures, shared ingestion regression for both sources, cross-source obvious matches/non-matches/ambiguous candidates, multiple independent listing histories per property, source outage/parser-failure lifecycle safety, and first-source regression.
 - Frontend tests cover UNKNOWN rendering, critical status formatting for STALE/FAILED/BLOCK, and watch-trigger formatting. Frontend build/typecheck is configured through `npm run build`; no separate frontend lint script exists.
 - Health endpoints: `GET /live` and `GET /api/v1/live` check process liveness; `GET /health` and `GET /api/v1/health` check application process, PostgreSQL connectivity, and PostGIS availability; `GET /ready` and `GET /api/v1/ready` check database, PostGIS, migrations, and blocking production config.
 - Frontend: Vite React dashboard exists under `frontend`.
@@ -174,18 +183,18 @@ Phase 14 is complete.
 
 Implement only:
 
-    PHASE 15 - Second Source & Cross-Portal Validation
+    PHASE 16 - Historical Evaluation & Shadow Portfolio
 
 Exact first logical task:
 
-    Implement the second source adapter foundation without duplicating the
-    ingestion pipeline: add the second-source fixtures/parser/adapter, persist
-    listings through the existing shared model, and verify cross-source property
-    matching for the same physical property across two portals.
+    Implement historical as-of reconstruction and shadow-deal persistence:
+    define the minimal shadow-deal/evaluation persistence needed by Phase 16,
+    preserve immutable linked analytical inputs, and prove historical queries
+    answer what the system knew and recommended at a past date without
+    look-ahead bias.
 
 Do not implement:
 
-- Phase 16 historical evaluation or shadow portfolio;
 - Phase 17 transaction data enrichment;
 - new market expansion;
 - large infrastructure redesign beyond the modular monolith.
@@ -199,50 +208,47 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 15 - Second Source & Cross-Portal Validation
+    -> PHASE 16 - Historical Evaluation & Shadow Portfolio
 
 Relevant specification sections only:
 
-    docs/02-system-architecture.md
-    -> Source Adapter
-    -> module boundaries
-    -> matching
-
     docs/03-data-model.md
-    -> Listing vs Property
-    -> matching history
-    -> provenance
-    -> images, if used
+    -> property_outcomes
+    -> shadow_deals, if present/required
+    -> analytical history
+    -> model versioning
+    -> as_of/history invariants
 
-    docs/04-scraping-specification.md
-    -> adapter contract
-    -> adding a new source
-    -> source reliability
-
-    docs/09-deployment-operations.md
-    -> source/worker reliability constraints that affect new adapters
+    docs/05-analysis-specification.md
+    -> Historical as_of
+    -> Look-Ahead Bias
+    -> Backtesting
+    -> False Positives / Negatives
+    -> Confidence Calibration
 
     docs/08-testing-specification.md
-    -> Phase 15 second-source adapter fixtures
-    -> shared ingestion regressions
-    -> cross-source matching tests
+    -> Phase 16 look-ahead protection
+    -> as-of reconstruction
+    -> shadow-deal immutability
+    -> outcome/history queries
 
 Existing implementation to inspect:
 
     backend/app/db/models.py
-    backend/app/ingestion/
-    backend/app/sources/four_zida/
-    backend/app/matching/property_resolution.py
-    backend/app/locations/
-    backend/tests/fixtures/four_zida/
-    backend/tests/test_four_zida_*.py
-    backend/tests/test_property_resolution.py
+    backend/app/opportunities/opportunity_engine.py
+    backend/app/deals/deal_engine.py
+    backend/app/valuation/comparable_engine.py
+    backend/app/acquisition/acquisition_service.py
+    backend/app/api/dashboard.py
+    backend/tests/test_opportunity_alerts.py
+    backend/tests/test_deal_engine.py
+    backend/tests/test_acquisition_crm.py
 
-Do not load Phase 16+ specifications unless a concrete Phase 15 dependency requires them.
+Do not load Phase 17+ specifications unless a concrete Phase 16 dependency requires them.
 
-## Phase 15 Scope Guard
+## Phase 16 Scope Guard
 
-Phase 15 is about adding a second source through the existing source adapter and ingestion boundaries, then proving cross-portal property identity. Do not implement historical evaluation/shadow portfolio or transaction-data enrichment.
+Phase 16 is about historical evaluation, shadow deals, as-of reconstruction, and look-ahead protection. Do not implement transaction-data enrichment or new source expansion.
 
 ## Update Rules
 

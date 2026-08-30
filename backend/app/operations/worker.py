@@ -4,7 +4,7 @@ import argparse
 import json
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,10 +19,12 @@ from app.ingestion.four_zida_discovery import (
     IngestionSummary,
     run_scheduled_four_zida_crawl,
 )
+from app.ingestion.nekretnine_rs_discovery import run_scheduled_nekretnine_rs_crawl
 from app.operations.maintenance import MaintenanceResult, run_operational_maintenance
 from app.opportunities.opportunity_engine import AlertDeliveryAttempt, send_due_telegram_alerts
 from app.opportunities.telegram import HttpTelegramSender, TelegramSender
 from app.sources.four_zida.adapter import FourZidaAdapter, FourZidaConfig
+from app.sources.nekretnine_rs.adapter import NekretnineRsAdapter, NekretnineRsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +33,14 @@ logger = logging.getLogger(__name__)
 class WorkerIterationResult:
     maintenance: MaintenanceResult
     crawl: dict[str, Any] | None
+    crawls: list[dict[str, Any]]
     alert_delivery_attempts: int
 
     def to_jsonable(self) -> dict[str, Any]:
         return {
             "maintenance": self.maintenance.to_jsonable(),
             "crawl": self.crawl,
+            "crawls": self.crawls,
             "alert_delivery_attempts": self.alert_delivery_attempts,
         }
 
@@ -57,17 +61,37 @@ def run_worker_iteration(
         settings=effective_settings,
         commit=False,
     )
-    crawl_summary: IngestionSummary | None = None
+    crawl_summaries: list[IngestionSummary] = []
     if not skip_crawl:
         adapter = FourZidaAdapter(config=_four_zida_config(effective_settings))
-        crawl_summary = run_scheduled_four_zida_crawl(
-            session,
-            mode=mode,
-            interval_seconds=effective_settings.worker_fast_discovery_interval_seconds,
-            adapter=adapter,
-            max_pages_per_market=effective_settings.four_zida_max_pages_per_market,
-            commit=False,
+        four_zida_summary = _run_crawl_safely(
+            "four_zida",
+            lambda: run_scheduled_four_zida_crawl(
+                session,
+                mode=mode,
+                interval_seconds=effective_settings.worker_fast_discovery_interval_seconds,
+                adapter=adapter,
+                max_pages_per_market=effective_settings.four_zida_max_pages_per_market,
+                commit=False,
+            ),
         )
+        if four_zida_summary is not None:
+            crawl_summaries.append(four_zida_summary)
+
+        nekretnine_adapter = NekretnineRsAdapter(config=_nekretnine_rs_config(effective_settings))
+        nekretnine_rs_summary = _run_crawl_safely(
+            "nekretnine_rs",
+            lambda: run_scheduled_nekretnine_rs_crawl(
+                session,
+                mode=mode,
+                interval_seconds=effective_settings.worker_fast_discovery_interval_seconds,
+                adapter=nekretnine_adapter,
+                max_pages_per_market=effective_settings.nekretnine_rs_max_pages_per_market,
+                commit=False,
+            ),
+        )
+        if nekretnine_rs_summary is not None:
+            crawl_summaries.append(nekretnine_rs_summary)
     attempts: list[AlertDeliveryAttempt] = []
     if send_alerts:
         attempts = send_due_telegram_alerts(
@@ -76,9 +100,11 @@ def run_worker_iteration(
         )
     if commit:
         session.commit()
+    crawl_payloads = [summary.to_jsonable() for summary in crawl_summaries]
     return WorkerIterationResult(
         maintenance=maintenance,
-        crawl=crawl_summary.to_jsonable() if crawl_summary is not None else None,
+        crawl=crawl_payloads[0] if crawl_payloads else None,
+        crawls=crawl_payloads,
         alert_delivery_attempts=len(attempts),
     )
 
@@ -129,6 +155,26 @@ def _four_zida_config(settings: Settings) -> FourZidaConfig:
         min_request_delay_seconds=settings.four_zida_min_request_delay_seconds,
         max_concurrency=settings.four_zida_max_concurrency,
     )
+
+
+def _nekretnine_rs_config(settings: Settings) -> NekretnineRsConfig:
+    return NekretnineRsConfig(
+        timeout_seconds=settings.nekretnine_rs_timeout_seconds,
+        retry_count=settings.nekretnine_rs_retry_count,
+        min_request_delay_seconds=settings.nekretnine_rs_min_request_delay_seconds,
+        max_concurrency=settings.nekretnine_rs_max_concurrency,
+    )
+
+
+def _run_crawl_safely(
+    source_code: str,
+    crawl: Callable[[], IngestionSummary | None],
+) -> IngestionSummary | None:
+    try:
+        return crawl()
+    except Exception:
+        logger.exception("scheduled source crawl failed source_code=%s", source_code)
+        return None
 
 
 def _mode_from_cli(value: str) -> CrawlMode:

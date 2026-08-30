@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from app.domain.enums import CurrencyCode, SellerType
-from app.sources.four_zida.dto import RawListingCard, RawListingDetail
+from app.sources.dto import RawListingCard, RawListingDetail
 
 _NUMBER_RE = re.compile(r"-?\d+(?:[.,]\d+)?(?:\.\d{3})*")
 _FLOOR_NUMBER_RE = re.compile(r"(\d+)")

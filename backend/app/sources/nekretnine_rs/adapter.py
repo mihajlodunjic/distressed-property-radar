@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from urllib.parse import urljoin
 
 import httpx
 
@@ -13,17 +12,23 @@ from app.sources.adapter_contract import (
     status_category,
 )
 from app.sources.dto import RawListingCard, RawListingDetail
-from app.sources.four_zida.parser import ParsedSearchPage, parse_detail_page, parse_search_page
+from app.sources.nekretnine_rs.parser import (
+    BASE_URL,
+    ParsedSearchPage,
+    parse_detail_page,
+    parse_search_page,
+)
 
-BASE_URL = "https://www.4zida.rs"
 DEFAULT_SEARCH_URLS = (
-    "https://www.4zida.rs/prodaja-stanova/zemun-opstina-beograd?m2From=35&m2To=90",
-    "https://www.4zida.rs/prodaja-stanova/novi-beograd-beograd?m2From=35&m2To=90",
+    "https://www.nekretnine.rs/stambeni-objekti/stanovi/beograd-zemun/prodaja/"
+    "?kvadratura_min=35&kvadratura_max=90",
+    "https://www.nekretnine.rs/stambeni-objekti/stanovi/beograd-novi-beograd/prodaja/"
+    "?kvadratura_min=35&kvadratura_max=90",
 )
 
 
 @dataclass(frozen=True)
-class FourZidaConfig:
+class NekretnineRsConfig:
     search_urls: tuple[str, ...] = DEFAULT_SEARCH_URLS
     timeout_seconds: float = 20.0
     retry_count: int = 2
@@ -42,17 +47,17 @@ class FourZidaConfig:
             raise ValueError("max_concurrency must be at least 1")
 
 
-class FourZidaAdapter:
+class NekretnineRsAdapter:
     def __init__(
         self,
-        config: FourZidaConfig | None = None,
+        config: NekretnineRsConfig | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.config = config or FourZidaConfig()
+        self.config = config or NekretnineRsConfig()
         self._client = client
         self._owns_client = client is None
 
-    async def __aenter__(self) -> FourZidaAdapter:
+    async def __aenter__(self) -> NekretnineRsAdapter:
         if self._client is None:
             self._client = httpx.AsyncClient(
                 timeout=self.config.timeout_seconds,
@@ -153,9 +158,8 @@ class FourZidaAdapter:
         return parse_search_page(html, url)
 
     async def fetch_detail(self, url: str) -> RawListingDetail:
-        canonical_url = urljoin(BASE_URL, url)
-        html = await self.fetch_text(canonical_url)
-        return parse_detail_page(html, canonical_url)
+        html = await self.fetch_text(url)
+        return parse_detail_page(html, url)
 
     async def fetch_text(self, url: str) -> str:
         if self._client is None:
@@ -191,3 +195,7 @@ class FourZidaAdapter:
         if last_error is None:
             last_error = SourceFetchError("NETWORK_ERROR", url, "request failed")
         raise last_error
+
+
+def canonical_base_url() -> str:
+    return BASE_URL

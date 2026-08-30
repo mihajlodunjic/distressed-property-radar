@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
-from app.sources.four_zida.dto import RawListingCard, RawListingDetail
+from app.sources.dto import RawListingCard, RawListingDetail
 
 BASE_URL = "https://www.4zida.rs"
 PARSER_VERSION = "four_zida_json_ld_v1"

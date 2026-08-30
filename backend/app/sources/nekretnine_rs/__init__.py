@@ -1,0 +1,1 @@
+"""Nekretnine.rs source adapter."""

@@ -380,8 +380,6 @@ def _score_property_candidate(
 
 
 def _is_auto_match(listing: Listing, candidate: ScoredPropertyCandidate) -> bool:
-    if candidate.similarity_score < AUTO_MATCH_THRESHOLD:
-        return False
     if candidate.location_score is None or candidate.location_score < Decimal("0.8500"):
         return False
     if candidate.size_score is None or candidate.size_score < Decimal("0.9000"):
@@ -390,7 +388,16 @@ def _is_auto_match(listing: Listing, candidate: ScoredPropertyCandidate) -> bool
         return False
     if listing.floor is None or candidate.property.floor is None:
         return False
-    return candidate.other_score is not None and candidate.other_score >= Decimal("0.6500")
+    if candidate.other_score is None or candidate.other_score < Decimal("0.6500"):
+        return False
+    if candidate.similarity_score >= AUTO_MATCH_THRESHOLD:
+        return True
+    return (
+        candidate.location_score >= Decimal("0.9500")
+        and candidate.size_score >= Decimal("0.9500")
+        and (candidate.rooms_score is None or candidate.rooms_score >= Decimal("0.9500"))
+        and candidate.other_score >= Decimal("1.0000")
+    )
 
 
 def _has_hard_structured_conflict(
