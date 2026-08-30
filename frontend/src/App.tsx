@@ -8,6 +8,7 @@ import {
   HEALTH_URL,
   apiDelete,
   apiGet,
+  apiPatch,
   apiPost,
   clearAccessToken,
   setAccessToken,
@@ -24,6 +25,8 @@ import {
 import type {
   ActionQueueItem,
   ActionQueueResponse,
+  PipelineItem,
+  PipelineResponse,
   PropertyDetail,
   PropertyListItem,
   PropertiesResponse,
@@ -45,6 +48,12 @@ type PageProps = {
   onAccessSaved: () => void;
 };
 
+type CommandResult = {
+  status: string;
+  invalidated_modules?: string[];
+  reanalyzed_modules?: string[];
+};
+
 type Route = {
   path: string;
   activePath: string;
@@ -53,6 +62,74 @@ type Route = {
 };
 
 const actionOrder = ["URGENT_CALL", "CALL", "REVIEW", "WATCH"];
+const pipelineStatuses = [
+  "NEW",
+  "REVIEWED",
+  "CALLED",
+  "VISIT_SCHEDULED",
+  "VISITED",
+  "DUE_DILIGENCE",
+  "OFFERED",
+  "NEGOTIATING",
+  "WON",
+  "LOST",
+  "SKIPPED",
+  "SOLD",
+];
+const reviewDecisions = ["INTERESTING", "NOT_INTERESTING", "UNSURE"];
+const sellerMotivationLevels = ["", "LOW", "MEDIUM", "HIGH", "UNKNOWN"];
+const reasonForSaleOptions = [
+  "",
+  "UNKNOWN",
+  "MOVING",
+  "MOVING_ABROAD",
+  "NEEDS_LIQUIDITY",
+  "INHERITANCE",
+  "DIVORCE",
+  "BUSINESS_LIQUIDITY",
+  "BOUGHT_ANOTHER_PROPERTY",
+  "VACANT_PROPERTY",
+  "INVESTOR_EXIT",
+  "TIME_DEADLINE",
+  "OTHER",
+];
+const booleanOptions = [
+  { label: "UNKNOWN", value: "" },
+  { label: "YES", value: "true" },
+  { label: "NO", value: "false" },
+];
+const skipReasonCodes = [
+  "OVERPRICED",
+  "NO_MARGIN",
+  "BAD_LEGAL",
+  "LOW_LIQUIDITY",
+  "BAD_LOCATION",
+  "BAD_BUILDING",
+  "HEAVY_RENOVATION",
+  "SELLER_UNREALISTIC",
+  "LOW_CONFIDENCE",
+  "FAKE_LISTING",
+  "OTHER",
+];
+const offerStatuses = [
+  "OPEN",
+  "ACCEPTED",
+  "REJECTED",
+  "COUNTERED",
+  "WITHDRAWN",
+  "EXPIRED",
+];
+const outcomeTypes = [
+  "STILL_ACTIVE",
+  "REMOVED_UNKNOWN",
+  "RELISTED",
+  "LIKELY_SOLD",
+  "CONFIRMED_SOLD",
+  "BOUGHT_BY_USER",
+  "LOST_TO_OTHER_BUYER",
+  "SALE_CANCELLED",
+  "OTHER",
+];
 const watchRuleTypes = [
   "",
   "ANY_PRICE_CHANGE",
@@ -103,6 +180,21 @@ function valueAsString(value: unknown): string | null {
 
 function valueAsBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function emptyToNull(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function booleanFromSelect(value: string): boolean | null {
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  return null;
 }
 
 function ValueText({ children }: { children: ReactNode }) {
@@ -558,6 +650,170 @@ function WatchlistRow({ item }: { item: WatchlistItem }) {
   );
 }
 
+function PipelinePage({ accessRevision, onAccessSaved }: PageProps) {
+  const [selectedStatus, setSelectedStatus] = useState("");
+  const path = selectedStatus
+    ? `/api/v1/pipeline?pipeline_status=${encodeURIComponent(selectedStatus)}`
+    : "/api/v1/pipeline";
+  const { state, reload } = useApiResource<PipelineResponse>(path, accessRevision);
+
+  return (
+    <ResourceView state={state} onAccessSaved={onAccessSaved} onRetry={reload}>
+      {(data) => (
+        <Section title="Pipeline">
+          <form
+            className="watch-form"
+            onSubmit={(event) => event.preventDefault()}
+          >
+            <label className="watch-field" htmlFor="pipeline-filter">
+              <span>Status</span>
+              <select
+                id="pipeline-filter"
+                onChange={(event) => setSelectedStatus(event.target.value)}
+                value={selectedStatus}
+              >
+                <option value="">ALL</option>
+                {pipelineStatuses.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </form>
+          <dl className="metric-grid">
+            {pipelineStatuses.map((status) => (
+              <Metric
+                key={status}
+                label={status.replaceAll("_", " ")}
+                value={<StatusCount count={data.summary[status] ?? 0} status={status} />}
+              />
+            ))}
+          </dl>
+          {data.items.length === 0 ? (
+            <Notice title="No properties in this pipeline view." />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Property</th>
+                    <th>Pipeline</th>
+                    <th>Action</th>
+                    <th>Last Interaction</th>
+                    <th>Next Follow-Up</th>
+                    <th>Latest Offer</th>
+                    <th>Skip / Outcome</th>
+                    <th>Listing</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((item) => (
+                    <PipelineRow item={item} key={item.property_id} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Section>
+      )}
+    </ResourceView>
+  );
+}
+
+function PipelineRow({ item }: { item: PipelineItem }) {
+  const pipeline = item.pipeline;
+  return (
+    <tr>
+      <td>
+        <a href={`/properties/${item.property_id}`}>
+          <ValueText>{displayValue(item.property_label)}</ValueText>
+        </a>
+        <div className="subtle-line">
+          {displayValue(item.location.label)} / {displayValue(item.size_m2, " m2")}
+        </div>
+      </td>
+      <td>
+        <div className="stack">
+          <StatusBadge status={pipeline.status} />
+          <span className="subtle-line">
+            {displayDateTime(pipeline.status_updated_at)}
+          </span>
+        </div>
+      </td>
+      <td>
+        <div className="stack">
+          <StatusBadge status={item.recommended_action} />
+          <ReasonCodes codes={item.reason_codes} />
+        </div>
+      </td>
+      <td>
+        {pipeline.latest_interaction ? (
+          <div className="stack">
+            <StatusBadge status={pipeline.latest_interaction.interaction_type} />
+            <span>{displayDateTime(pipeline.latest_interaction.occurred_at)}</span>
+            <span className="subtle-line">
+              {displayValue(pipeline.latest_interaction.notes)}
+            </span>
+          </div>
+        ) : (
+          <ValueText>UNKNOWN</ValueText>
+        )}
+      </td>
+      <td>
+        {pipeline.next_follow_up ? (
+          <div className="stack">
+            <span>{displayDateTime(pipeline.next_follow_up.follow_up_at)}</span>
+            <span className="subtle-line">
+              {displayValue(pipeline.next_follow_up.follow_up_notes)}
+            </span>
+          </div>
+        ) : (
+          <ValueText>UNKNOWN</ValueText>
+        )}
+      </td>
+      <td>
+        {pipeline.latest_offer ? (
+          <div className="stack">
+            <StatusBadge status={pipeline.latest_offer.status} />
+            <span>
+              {displayMoney(
+                pipeline.latest_offer.amount,
+                pipeline.latest_offer.currency,
+              )}
+            </span>
+            <span className="subtle-line">
+              Counter:{" "}
+              {displayMoney(
+                pipeline.latest_offer.counteroffer_amount,
+                pipeline.latest_offer.currency,
+              )}
+            </span>
+          </div>
+        ) : (
+          <ValueText>UNKNOWN</ValueText>
+        )}
+      </td>
+      <td>
+        <div className="stack">
+          {pipeline.latest_skip ? (
+            <StatusBadge status={pipeline.latest_skip.reason_code} />
+          ) : null}
+          {pipeline.latest_outcome ? (
+            <StatusBadge status={pipeline.latest_outcome.outcome_type} />
+          ) : null}
+          {!pipeline.latest_skip && !pipeline.latest_outcome ? (
+            <ValueText>UNKNOWN</ValueText>
+          ) : null}
+        </div>
+      </td>
+      <td>
+        <ExternalListingLink url={item.current_listing.url} />
+      </td>
+    </tr>
+  );
+}
+
 function PropertyDetailPage({
   propertyId,
   accessRevision,
@@ -592,11 +848,202 @@ function PropertyDetailContent({
   );
   const [commandMessage, setCommandMessage] = useState<string | null>(null);
   const [commandPending, setCommandPending] = useState(false);
+  const [pipelineStatus, setPipelineStatus] = useState(detail.acquisition.pipeline_status);
+  const [pipelineReason, setPipelineReason] = useState("");
+  const [reviewDecision, setReviewDecision] = useState("INTERESTING");
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [reviewManualFmv, setReviewManualFmv] = useState("");
+  const [reviewManualFastSale, setReviewManualFastSale] = useState("");
+  const [reviewManualMaxBuy, setReviewManualMaxBuy] = useState("");
+  const [callSellerMotivation, setCallSellerMotivation] = useState("");
+  const [callReasonForSale, setCallReasonForSale] = useState("");
+  const [callLowestPrice, setCallLowestPrice] = useState("");
+  const [callCashPreferred, setCallCashPreferred] = useState("");
+  const [callViewingAvailable, setCallViewingAvailable] = useState("");
+  const [callClaimedRegistered, setCallClaimedRegistered] = useState("");
+  const [callClaimedOwner, setCallClaimedOwner] = useState("");
+  const [callClaimedMortgage, setCallClaimedMortgage] = useState("");
+  const [callTenantPresent, setCallTenantPresent] = useState("");
+  const [callDesiredClosingDays, setCallDesiredClosingDays] = useState("");
+  const [callFollowUpAt, setCallFollowUpAt] = useState("");
+  const [callFollowUpNotes, setCallFollowUpNotes] = useState("");
+  const [callNotes, setCallNotes] = useState("");
+  const [visitCondition, setVisitCondition] = useState("");
+  const [visitRenovationBase, setVisitRenovationBase] = useState("");
+  const [visitElevatorVerified, setVisitElevatorVerified] = useState("");
+  const [visitManualFmv, setVisitManualFmv] = useState("");
+  const [visitManualFastSale, setVisitManualFastSale] = useState("");
+  const [visitManualMaxBuy, setVisitManualMaxBuy] = useState("");
+  const [visitVisibleDefects, setVisitVisibleDefects] = useState("");
+  const [visitNotes, setVisitNotes] = useState("");
+  const [offerAmount, setOfferAmount] = useState("");
+  const [offerStatus, setOfferStatus] = useState("OPEN");
+  const [offerCounteroffer, setOfferCounteroffer] = useState("");
+  const [offerNotes, setOfferNotes] = useState("");
+  const [skipReason, setSkipReason] = useState("OVERPRICED");
+  const [skipNotes, setSkipNotes] = useState("");
+  const [outcomeType, setOutcomeType] = useState("STILL_ACTIVE");
+  const [outcomeSalePrice, setOutcomeSalePrice] = useState("");
+  const [outcomeNotes, setOutcomeNotes] = useState("");
 
   useEffect(() => {
     setWatchRuleType(detail.watch.active_rule?.rule_type ?? "");
     setWatchThreshold(detail.watch.active_rule?.threshold_numeric ?? "");
   }, [detail.watch.active_rule?.rule_type, detail.watch.active_rule?.threshold_numeric]);
+
+  useEffect(() => {
+    setPipelineStatus(detail.acquisition.pipeline_status);
+  }, [detail.acquisition.pipeline_status]);
+
+  async function runCommand(
+    action: () => Promise<CommandResult>,
+    failureMessage: string,
+  ) {
+    setCommandPending(true);
+    setCommandMessage(null);
+    try {
+      const response = await action();
+      const invalidated = response.invalidated_modules?.join(", ");
+      const reanalyzed = response.reanalyzed_modules?.join(", ");
+      setCommandMessage(
+        [
+          response.status,
+          invalidated ? `invalidated: ${invalidated}` : null,
+          reanalyzed ? `reanalyzed: ${reanalyzed}` : null,
+        ]
+          .filter(Boolean)
+          .join(" / "),
+      );
+      onReload();
+    } catch (error) {
+      setCommandMessage(error instanceof Error ? error.message : failureMessage);
+    } finally {
+      setCommandPending(false);
+    }
+  }
+
+  async function submitPipelineStatus(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runCommand(
+      () =>
+        apiPatch<CommandResult>(
+          `/api/v1/properties/${detail.property.property_id}/pipeline-status`,
+          {
+            status: pipelineStatus,
+            reason: emptyToNull(pipelineReason),
+          },
+        ),
+      "Pipeline update failed",
+    );
+  }
+
+  async function submitReview(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runCommand(
+      () =>
+        apiPost<CommandResult>(`/api/v1/properties/${detail.property.property_id}/review`, {
+          decision: reviewDecision,
+          manual_fmv: emptyToNull(reviewManualFmv),
+          manual_fast_sale_value: emptyToNull(reviewManualFastSale),
+          manual_max_buy_price: emptyToNull(reviewManualMaxBuy),
+          notes: emptyToNull(reviewNotes),
+        }),
+      "Review request failed",
+    );
+  }
+
+  async function submitCall(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runCommand(
+      () =>
+        apiPost<CommandResult>(
+          `/api/v1/properties/${detail.property.property_id}/interactions/call`,
+          {
+            seller_motivation: callSellerMotivation || null,
+            reason_for_sale: callReasonForSale || null,
+            lowest_indicated_price: emptyToNull(callLowestPrice),
+            cash_preferred: booleanFromSelect(callCashPreferred),
+            desired_closing_days: emptyToNull(callDesiredClosingDays),
+            viewing_available: booleanFromSelect(callViewingAvailable),
+            claimed_registered: booleanFromSelect(callClaimedRegistered),
+            claimed_owner_1_1: booleanFromSelect(callClaimedOwner),
+            claimed_mortgage: booleanFromSelect(callClaimedMortgage),
+            tenant_present: booleanFromSelect(callTenantPresent),
+            follow_up_at: emptyToNull(callFollowUpAt),
+            follow_up_notes: emptyToNull(callFollowUpNotes),
+            notes: emptyToNull(callNotes),
+          },
+        ),
+      "Call feedback request failed",
+    );
+  }
+
+  async function submitVisit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const visibleDefects = visitVisibleDefects
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    await runCommand(
+      () =>
+        apiPost<CommandResult>(
+          `/api/v1/properties/${detail.property.property_id}/interactions/visit`,
+          {
+            condition_category: emptyToNull(visitCondition),
+            estimated_renovation_base: emptyToNull(visitRenovationBase),
+            elevator_verified: booleanFromSelect(visitElevatorVerified),
+            visible_defects: visibleDefects,
+            manual_fmv: emptyToNull(visitManualFmv),
+            manual_fast_sale_value: emptyToNull(visitManualFastSale),
+            manual_max_buy_price: emptyToNull(visitManualMaxBuy),
+            notes: emptyToNull(visitNotes),
+          },
+        ),
+      "Visit feedback request failed",
+    );
+  }
+
+  async function submitOffer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runCommand(
+      () =>
+        apiPost<CommandResult>(`/api/v1/properties/${detail.property.property_id}/offers`, {
+          amount: offerAmount,
+          currency: currency ?? "EUR",
+          status: offerStatus,
+          counteroffer_amount: emptyToNull(offerCounteroffer),
+          notes: emptyToNull(offerNotes),
+        }),
+      "Offer request failed",
+    );
+  }
+
+  async function submitSkip(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runCommand(
+      () =>
+        apiPost<CommandResult>(`/api/v1/properties/${detail.property.property_id}/skip`, {
+          reason_code: skipReason,
+          notes: emptyToNull(skipNotes),
+        }),
+      "Skip request failed",
+    );
+  }
+
+  async function submitOutcome(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await runCommand(
+      () =>
+        apiPost<CommandResult>(`/api/v1/properties/${detail.property.property_id}/outcomes`, {
+          outcome_type: outcomeType,
+          sale_price: emptyToNull(outcomeSalePrice),
+          currency: currency ?? "EUR",
+          source_kind: "MANUAL",
+          notes: emptyToNull(outcomeNotes),
+        }),
+      "Outcome request failed",
+    );
+  }
 
   async function submitWatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -770,6 +1217,512 @@ function PropertyDetailContent({
             ["Last Triggered", displayDateTime(detail.watch.active_rule?.triggered_at)],
           ]}
         />
+      </Section>
+
+      <Section
+        title="Acquisition Workflow"
+        eyebrow={<StatusBadge status={detail.acquisition.pipeline_status} />}
+      >
+        {commandMessage ? <StatusBadge status={commandMessage} /> : null}
+        <div className="crm-grid">
+          <form className="crm-form" onSubmit={submitPipelineStatus}>
+            <h3>Pipeline Status</h3>
+            <label className="watch-field" htmlFor="pipeline-status">
+              <span>Status</span>
+              <select
+                id="pipeline-status"
+                onChange={(event) => setPipelineStatus(event.target.value)}
+                value={pipelineStatus}
+              >
+                {pipelineStatuses.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="watch-field" htmlFor="pipeline-reason">
+              <span>Reason</span>
+              <input
+                id="pipeline-reason"
+                onChange={(event) => setPipelineReason(event.target.value)}
+                value={pipelineReason}
+              />
+            </label>
+            <button disabled={commandPending} type="submit">
+              Update Status
+            </button>
+          </form>
+
+          <form className="crm-form" onSubmit={submitReview}>
+            <h3>Review</h3>
+            <label className="watch-field" htmlFor="review-decision">
+              <span>Decision</span>
+              <select
+                id="review-decision"
+                onChange={(event) => setReviewDecision(event.target.value)}
+                value={reviewDecision}
+              >
+                {reviewDecisions.map((decision) => (
+                  <option key={decision} value={decision}>
+                    {decision}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="crm-form-row">
+              <label className="watch-field" htmlFor="review-fmv">
+                <span>Manual FMV</span>
+                <input
+                  id="review-fmv"
+                  inputMode="decimal"
+                  onChange={(event) => setReviewManualFmv(event.target.value)}
+                  placeholder="UNKNOWN"
+                  value={reviewManualFmv}
+                />
+              </label>
+              <label className="watch-field" htmlFor="review-fast-sale">
+                <span>Fast Sale</span>
+                <input
+                  id="review-fast-sale"
+                  inputMode="decimal"
+                  onChange={(event) => setReviewManualFastSale(event.target.value)}
+                  placeholder="UNKNOWN"
+                  value={reviewManualFastSale}
+                />
+              </label>
+              <label className="watch-field" htmlFor="review-max-buy">
+                <span>Max Buy</span>
+                <input
+                  id="review-max-buy"
+                  inputMode="decimal"
+                  onChange={(event) => setReviewManualMaxBuy(event.target.value)}
+                  placeholder="UNKNOWN"
+                  value={reviewManualMaxBuy}
+                />
+              </label>
+            </div>
+            <label className="watch-field" htmlFor="review-notes">
+              <span>Notes</span>
+              <textarea
+                id="review-notes"
+                onChange={(event) => setReviewNotes(event.target.value)}
+                value={reviewNotes}
+              />
+            </label>
+            <button disabled={commandPending} type="submit">
+              Save Review
+            </button>
+          </form>
+
+          <form className="crm-form wide-form" onSubmit={submitCall}>
+            <h3>Log Call</h3>
+            <div className="crm-form-row">
+              <label className="watch-field" htmlFor="call-motivation">
+                <span>Motivation</span>
+                <select
+                  id="call-motivation"
+                  onChange={(event) => setCallSellerMotivation(event.target.value)}
+                  value={callSellerMotivation}
+                >
+                  {sellerMotivationLevels.map((level) => (
+                    <option key={level || "UNKNOWN"} value={level}>
+                      {level || "UNKNOWN"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="watch-field" htmlFor="call-reason">
+                <span>Reason For Sale</span>
+                <select
+                  id="call-reason"
+                  onChange={(event) => setCallReasonForSale(event.target.value)}
+                  value={callReasonForSale}
+                >
+                  {reasonForSaleOptions.map((reason) => (
+                    <option key={reason || "UNKNOWN"} value={reason}>
+                      {reason || "UNKNOWN"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="watch-field" htmlFor="call-lowest-price">
+                <span>Lowest Price</span>
+                <input
+                  id="call-lowest-price"
+                  inputMode="decimal"
+                  onChange={(event) => setCallLowestPrice(event.target.value)}
+                  placeholder="UNKNOWN"
+                  value={callLowestPrice}
+                />
+              </label>
+            </div>
+            <div className="crm-form-row">
+              <label className="watch-field" htmlFor="call-cash">
+                <span>Cash Preferred</span>
+                <select
+                  id="call-cash"
+                  onChange={(event) => setCallCashPreferred(event.target.value)}
+                  value={callCashPreferred}
+                >
+                  {booleanOptions.map((option) => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="watch-field" htmlFor="call-viewing">
+                <span>Viewing</span>
+                <select
+                  id="call-viewing"
+                  onChange={(event) => setCallViewingAvailable(event.target.value)}
+                  value={callViewingAvailable}
+                >
+                  {booleanOptions.map((option) => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="watch-field" htmlFor="call-days">
+                <span>Closing Days</span>
+                <input
+                  id="call-days"
+                  inputMode="numeric"
+                  onChange={(event) => setCallDesiredClosingDays(event.target.value)}
+                  placeholder="UNKNOWN"
+                  value={callDesiredClosingDays}
+                />
+              </label>
+            </div>
+            <div className="crm-form-row">
+              <label className="watch-field" htmlFor="call-registered">
+                <span>Claimed Registered</span>
+                <select
+                  id="call-registered"
+                  onChange={(event) => setCallClaimedRegistered(event.target.value)}
+                  value={callClaimedRegistered}
+                >
+                  {booleanOptions.map((option) => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="watch-field" htmlFor="call-owner">
+                <span>Claimed Owner 1/1</span>
+                <select
+                  id="call-owner"
+                  onChange={(event) => setCallClaimedOwner(event.target.value)}
+                  value={callClaimedOwner}
+                >
+                  {booleanOptions.map((option) => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="watch-field" htmlFor="call-mortgage">
+                <span>Claimed Mortgage</span>
+                <select
+                  id="call-mortgage"
+                  onChange={(event) => setCallClaimedMortgage(event.target.value)}
+                  value={callClaimedMortgage}
+                >
+                  {booleanOptions.map((option) => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="watch-field" htmlFor="call-tenant">
+                <span>Tenant</span>
+                <select
+                  id="call-tenant"
+                  onChange={(event) => setCallTenantPresent(event.target.value)}
+                  value={callTenantPresent}
+                >
+                  {booleanOptions.map((option) => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="crm-form-row">
+              <label className="watch-field" htmlFor="call-follow-up-at">
+                <span>Follow-Up At</span>
+                <input
+                  id="call-follow-up-at"
+                  onChange={(event) => setCallFollowUpAt(event.target.value)}
+                  type="datetime-local"
+                  value={callFollowUpAt}
+                />
+              </label>
+              <label className="watch-field" htmlFor="call-follow-up-notes">
+                <span>Follow-Up Notes</span>
+                <input
+                  id="call-follow-up-notes"
+                  onChange={(event) => setCallFollowUpNotes(event.target.value)}
+                  value={callFollowUpNotes}
+                />
+              </label>
+            </div>
+            <label className="watch-field" htmlFor="call-notes">
+              <span>Notes</span>
+              <textarea
+                id="call-notes"
+                onChange={(event) => setCallNotes(event.target.value)}
+                value={callNotes}
+              />
+            </label>
+            <button disabled={commandPending} type="submit">
+              Save Call
+            </button>
+          </form>
+
+          <form className="crm-form wide-form" onSubmit={submitVisit}>
+            <h3>Log Visit</h3>
+            <div className="crm-form-row">
+              <label className="watch-field" htmlFor="visit-condition">
+                <span>Condition</span>
+                <input
+                  id="visit-condition"
+                  onChange={(event) => setVisitCondition(event.target.value)}
+                  placeholder="UNKNOWN"
+                  value={visitCondition}
+                />
+              </label>
+              <label className="watch-field" htmlFor="visit-renovation">
+                <span>Renovation Base</span>
+                <input
+                  id="visit-renovation"
+                  inputMode="decimal"
+                  onChange={(event) => setVisitRenovationBase(event.target.value)}
+                  placeholder="UNKNOWN"
+                  value={visitRenovationBase}
+                />
+              </label>
+              <label className="watch-field" htmlFor="visit-elevator">
+                <span>Elevator Verified</span>
+                <select
+                  id="visit-elevator"
+                  onChange={(event) => setVisitElevatorVerified(event.target.value)}
+                  value={visitElevatorVerified}
+                >
+                  {booleanOptions.map((option) => (
+                    <option key={option.label} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="crm-form-row">
+              <label className="watch-field" htmlFor="visit-fmv">
+                <span>Manual FMV</span>
+                <input
+                  id="visit-fmv"
+                  inputMode="decimal"
+                  onChange={(event) => setVisitManualFmv(event.target.value)}
+                  placeholder="UNKNOWN"
+                  value={visitManualFmv}
+                />
+              </label>
+              <label className="watch-field" htmlFor="visit-fast-sale">
+                <span>Fast Sale</span>
+                <input
+                  id="visit-fast-sale"
+                  inputMode="decimal"
+                  onChange={(event) => setVisitManualFastSale(event.target.value)}
+                  placeholder="UNKNOWN"
+                  value={visitManualFastSale}
+                />
+              </label>
+              <label className="watch-field" htmlFor="visit-max-buy">
+                <span>Max Buy</span>
+                <input
+                  id="visit-max-buy"
+                  inputMode="decimal"
+                  onChange={(event) => setVisitManualMaxBuy(event.target.value)}
+                  placeholder="UNKNOWN"
+                  value={visitManualMaxBuy}
+                />
+              </label>
+            </div>
+            <label className="watch-field" htmlFor="visit-defects">
+              <span>Visible Defects</span>
+              <input
+                id="visit-defects"
+                onChange={(event) => setVisitVisibleDefects(event.target.value)}
+                placeholder="comma separated"
+                value={visitVisibleDefects}
+              />
+            </label>
+            <label className="watch-field" htmlFor="visit-notes">
+              <span>Notes</span>
+              <textarea
+                id="visit-notes"
+                onChange={(event) => setVisitNotes(event.target.value)}
+                value={visitNotes}
+              />
+            </label>
+            <button disabled={commandPending} type="submit">
+              Save Visit
+            </button>
+          </form>
+
+          <form className="crm-form" onSubmit={submitOffer}>
+            <h3>Offer</h3>
+            <label className="watch-field" htmlFor="offer-amount">
+              <span>Amount</span>
+              <input
+                id="offer-amount"
+                inputMode="decimal"
+                onChange={(event) => setOfferAmount(event.target.value)}
+                required
+                value={offerAmount}
+              />
+            </label>
+            <label className="watch-field" htmlFor="offer-status">
+              <span>Status</span>
+              <select
+                id="offer-status"
+                onChange={(event) => setOfferStatus(event.target.value)}
+                value={offerStatus}
+              >
+                {offerStatuses.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="watch-field" htmlFor="offer-counter">
+              <span>Counteroffer</span>
+              <input
+                id="offer-counter"
+                inputMode="decimal"
+                onChange={(event) => setOfferCounteroffer(event.target.value)}
+                placeholder="UNKNOWN"
+                value={offerCounteroffer}
+              />
+            </label>
+            <label className="watch-field" htmlFor="offer-notes">
+              <span>Notes</span>
+              <textarea
+                id="offer-notes"
+                onChange={(event) => setOfferNotes(event.target.value)}
+                value={offerNotes}
+              />
+            </label>
+            <button disabled={commandPending} type="submit">
+              Save Offer
+            </button>
+          </form>
+
+          <form className="crm-form" onSubmit={submitSkip}>
+            <h3>Skip</h3>
+            <label className="watch-field" htmlFor="skip-reason">
+              <span>Reason</span>
+              <select
+                id="skip-reason"
+                onChange={(event) => setSkipReason(event.target.value)}
+                value={skipReason}
+              >
+                {skipReasonCodes.map((reason) => (
+                  <option key={reason} value={reason}>
+                    {reason}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="watch-field" htmlFor="skip-notes">
+              <span>Notes</span>
+              <textarea
+                id="skip-notes"
+                onChange={(event) => setSkipNotes(event.target.value)}
+                value={skipNotes}
+              />
+            </label>
+            <button disabled={commandPending} type="submit">
+              Skip Property
+            </button>
+          </form>
+
+          <form className="crm-form" onSubmit={submitOutcome}>
+            <h3>Outcome</h3>
+            <label className="watch-field" htmlFor="outcome-type">
+              <span>Outcome</span>
+              <select
+                id="outcome-type"
+                onChange={(event) => setOutcomeType(event.target.value)}
+                value={outcomeType}
+              >
+                {outcomeTypes.map((outcome) => (
+                  <option key={outcome} value={outcome}>
+                    {outcome}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="watch-field" htmlFor="outcome-sale-price">
+              <span>Sale Price</span>
+              <input
+                id="outcome-sale-price"
+                inputMode="decimal"
+                onChange={(event) => setOutcomeSalePrice(event.target.value)}
+                placeholder="UNKNOWN"
+                value={outcomeSalePrice}
+              />
+            </label>
+            <label className="watch-field" htmlFor="outcome-notes">
+              <span>Notes</span>
+              <textarea
+                id="outcome-notes"
+                onChange={(event) => setOutcomeNotes(event.target.value)}
+                value={outcomeNotes}
+              />
+            </label>
+            <button disabled={commandPending} type="submit">
+              Save Outcome
+            </button>
+          </form>
+        </div>
+        <KeyValueGrid
+          rows={[
+            ["Status Updated", displayDateTime(detail.acquisition.pipeline_status_updated_at)],
+            ["Reviews", detail.acquisition.reviews.length],
+            ["Interactions", detail.acquisition.interactions.length],
+            ["Offers", detail.acquisition.offers.length],
+            ["Manual Overrides", detail.acquisition.overrides.length],
+          ]}
+        />
+      </Section>
+
+      <Section title="Acquisition Timeline">
+        {detail.acquisition.timeline.length === 0 ? (
+          <Notice title="No acquisition activity yet." />
+        ) : (
+          <DataTable
+            columns={["When", "Type", "Summary", "Follow-Up", "Notes"]}
+            rows={detail.acquisition.timeline.map((item) => [
+              displayDateTime(item.occurred_at),
+              <StatusBadge status={item.type} key={`${item.record_id}-type`} />,
+              displayValue(item.summary),
+              item.follow_up_at
+                ? `${displayDateTime(item.follow_up_at)} ${displayValue(item.follow_up_notes)}`
+                : "UNKNOWN",
+              displayValue(item.notes),
+            ])}
+          />
+        )}
       </Section>
 
       <Section title="What Changed">
@@ -1194,6 +2147,14 @@ function currentRoute(props: PageProps): Route {
       element: <WatchlistPage {...props} />,
     };
   }
+  if (path === "/pipeline") {
+    return {
+      path,
+      activePath: "/pipeline",
+      label: "Pipeline",
+      element: <PipelinePage {...props} />,
+    };
+  }
   if (path === "/sources") {
     return {
       path,
@@ -1222,6 +2183,7 @@ const navItems = [
   { path: "/", label: "Action Queue" },
   { path: "/properties", label: "Properties" },
   { path: "/watchlist", label: "Watchlist" },
+  { path: "/pipeline", label: "Pipeline" },
   { path: "/sources", label: "Sources" },
   { path: "/settings", label: "Settings" },
 ];

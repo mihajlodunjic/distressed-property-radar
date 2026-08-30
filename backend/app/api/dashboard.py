@@ -12,38 +12,66 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, aliased
 
+from app.acquisition.acquisition_service import (
+    create_offer,
+    log_call_feedback,
+    log_visit_feedback,
+    record_property_outcome,
+    record_property_review,
+    set_pipeline_status,
+    skip_property,
+    update_offer,
+)
 from app.api.dependencies import get_db_session, require_api_access
 from app.core.config import get_settings
 from app.db.models import (
+    CallFeedback,
     ComparableItem,
     ComparableSet,
     CostProfile,
     DealAnalysis,
     DealScenario,
     FastSaleEstimate,
+    Interaction,
     InvestmentProfile,
     JobRun,
     LiquidityAssessment,
     Listing,
     ListingEvent,
     LlmAnalysis,
+    Offer,
     OpportunityAssessment,
+    PipelineStatusEvent,
     Property,
     PropertyAnalysisState,
     PropertyFeature,
+    PropertyOutcome,
+    PropertyOverride,
+    PropertyReview,
     RiskAssessment,
     RiskFlag,
     SellerAssessment,
+    SkipRecord,
     Source,
     SourceRuntimeState,
     Valuation,
+    VisitFeedback,
     WatchRule,
     WatchTriggerEvent,
 )
 from app.domain.enums import (
+    AnalysisLevel,
+    CurrencyCode,
+    DataSourceKind,
     ListingEventType,
     ListingStatus,
+    OfferStatus,
     OpportunityAction,
+    PropertyOutcomeType,
+    PropertyPipelineStatus,
+    PropertyReviewDecision,
+    ReasonForSale,
+    SkipReasonCode,
     SourceHealthStatus,
     WatchRuleType,
 )
@@ -71,6 +99,112 @@ class WatchRuleRequest(BaseModel):
     rule_type: WatchRuleType | None = None
     threshold_numeric: Decimal | None = Field(default=None, gt=0)
     rule_config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reviewed_at: datetime | None = None
+    decision: PropertyReviewDecision
+    manual_fmv: Decimal | None = Field(default=None, ge=0)
+    manual_fast_sale_value: Decimal | None = Field(default=None, ge=0)
+    manual_max_buy_price: Decimal | None = Field(default=None, ge=0)
+    notes: str | None = None
+
+
+class PipelineStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: PropertyPipelineStatus
+    reason: str | None = None
+
+
+class CallFeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    occurred_at: datetime | None = None
+    follow_up_at: datetime | None = None
+    follow_up_notes: str | None = None
+    seller_motivation: AnalysisLevel | None = None
+    reason_for_sale: ReasonForSale | None = None
+    lowest_indicated_price: Decimal | None = Field(default=None, ge=0)
+    cash_preferred: bool | None = None
+    desired_closing_days: int | None = Field(default=None, ge=0)
+    viewing_available: bool | None = None
+    claimed_registered: bool | None = None
+    claimed_owner_1_1: bool | None = None
+    claimed_mortgage: bool | None = None
+    tenant_present: bool | None = None
+    structured_notes: dict[str, Any] = Field(default_factory=dict)
+    notes: str | None = None
+
+
+class VisitFeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    occurred_at: datetime | None = None
+    follow_up_at: datetime | None = None
+    follow_up_notes: str | None = None
+    condition_category: str | None = None
+    estimated_renovation_low: Decimal | None = Field(default=None, ge=0)
+    estimated_renovation_base: Decimal | None = Field(default=None, ge=0)
+    estimated_renovation_high: Decimal | None = Field(default=None, ge=0)
+    layout_score: int | None = Field(default=None, ge=1, le=5)
+    light_score: int | None = Field(default=None, ge=1, le=5)
+    noise_score: int | None = Field(default=None, ge=1, le=5)
+    building_score: int | None = Field(default=None, ge=1, le=5)
+    entrance_score: int | None = Field(default=None, ge=1, le=5)
+    parking_score: int | None = Field(default=None, ge=1, le=5)
+    elevator_verified: bool | None = None
+    visible_defects: list[Any] = Field(default_factory=list)
+    manual_fmv: Decimal | None = Field(default=None, ge=0)
+    manual_fast_sale_value: Decimal | None = Field(default=None, ge=0)
+    manual_max_buy_price: Decimal | None = Field(default=None, ge=0)
+    notes: str | None = None
+
+
+class OfferCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    offered_at: datetime | None = None
+    amount: Decimal = Field(gt=0)
+    currency: CurrencyCode = CurrencyCode.EUR
+    offer_type: str | None = "INITIAL"
+    conditions: dict[str, Any] = Field(default_factory=dict)
+    status: OfferStatus = OfferStatus.OPEN
+    seller_response_at: datetime | None = None
+    counteroffer_amount: Decimal | None = Field(default=None, ge=0)
+    notes: str | None = None
+
+
+class OfferPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: OfferStatus | None = None
+    seller_response_at: datetime | None = None
+    counteroffer_amount: Decimal | None = Field(default=None, ge=0)
+    notes: str | None = None
+
+
+class SkipRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    skipped_at: datetime | None = None
+    reason_code: SkipReasonCode
+    notes: str | None = None
+
+
+class OutcomeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome_date: datetime | None = None
+    outcome_type: PropertyOutcomeType
+    sale_price: Decimal | None = Field(default=None, ge=0)
+    currency: CurrencyCode | None = None
+    confidence: Decimal | None = Field(default=None, ge=0, le=100)
+    source_kind: DataSourceKind | None = DataSourceKind.MANUAL
+    source_reference: str | None = None
+    notes: str | None = None
 
 
 def _enum_value(value: Any) -> Any:
@@ -389,6 +523,155 @@ def _serialize_watch_trigger(trigger: WatchTriggerEvent) -> dict[str, Any]:
             else None
         ),
         "alert_id": str(trigger.alert_id) if trigger.alert_id else None,
+    }
+
+
+def _serialize_review(review: PropertyReview) -> dict[str, Any]:
+    return {
+        "review_id": str(review.id),
+        "property_id": str(review.property_id),
+        "reviewed_at": _iso(review.reviewed_at),
+        "decision": str(_enum_value(review.decision)),
+        "manual_fmv": _decimal(review.manual_fmv),
+        "manual_fast_sale_value": _decimal(review.manual_fast_sale_value),
+        "manual_max_buy_price": _decimal(review.manual_max_buy_price),
+        "notes": review.notes,
+        "created_at": _iso(review.created_at),
+        "updated_at": _iso(review.updated_at),
+    }
+
+
+def _serialize_call_feedback(feedback: CallFeedback | None) -> dict[str, Any] | None:
+    if feedback is None:
+        return None
+    return {
+        "seller_motivation": str(_enum_value(feedback.seller_motivation))
+        if feedback.seller_motivation
+        else None,
+        "reason_for_sale": str(_enum_value(feedback.reason_for_sale))
+        if feedback.reason_for_sale
+        else None,
+        "lowest_indicated_price": _decimal(feedback.lowest_indicated_price),
+        "cash_preferred": feedback.cash_preferred,
+        "desired_closing_days": feedback.desired_closing_days,
+        "viewing_available": feedback.viewing_available,
+        "claimed_registered": feedback.claimed_registered,
+        "claimed_owner_1_1": feedback.claimed_owner_1_1,
+        "claimed_mortgage": feedback.claimed_mortgage,
+        "tenant_present": feedback.tenant_present,
+        "structured_notes": _json_safe(feedback.structured_notes_json),
+    }
+
+
+def _serialize_visit_feedback(feedback: VisitFeedback | None) -> dict[str, Any] | None:
+    if feedback is None:
+        return None
+    return {
+        "condition_category": feedback.condition_category,
+        "estimated_renovation_low": _decimal(feedback.estimated_renovation_low),
+        "estimated_renovation_base": _decimal(feedback.estimated_renovation_base),
+        "estimated_renovation_high": _decimal(feedback.estimated_renovation_high),
+        "layout_score": feedback.layout_score,
+        "light_score": feedback.light_score,
+        "noise_score": feedback.noise_score,
+        "building_score": feedback.building_score,
+        "entrance_score": feedback.entrance_score,
+        "parking_score": feedback.parking_score,
+        "elevator_verified": feedback.elevator_verified,
+        "visible_defects": _json_safe(feedback.visible_defects_json),
+        "manual_fmv": _decimal(feedback.manual_fmv),
+        "manual_fast_sale_value": _decimal(feedback.manual_fast_sale_value),
+        "manual_max_buy_price": _decimal(feedback.manual_max_buy_price),
+        "notes": feedback.notes,
+    }
+
+
+def _serialize_interaction(interaction: Interaction) -> dict[str, Any]:
+    return {
+        "interaction_id": str(interaction.id),
+        "property_id": str(interaction.property_id),
+        "interaction_type": str(_enum_value(interaction.interaction_type)),
+        "occurred_at": _iso(interaction.occurred_at),
+        "follow_up_at": _iso(interaction.follow_up_at),
+        "follow_up_notes": interaction.follow_up_notes,
+        "notes": interaction.notes,
+        "created_at": _iso(interaction.created_at),
+        "call_feedback": _serialize_call_feedback(interaction.call_feedback),
+        "visit_feedback": _serialize_visit_feedback(interaction.visit_feedback),
+    }
+
+
+def _serialize_offer(offer: Offer) -> dict[str, Any]:
+    return {
+        "offer_id": str(offer.id),
+        "property_id": str(offer.property_id),
+        "offered_at": _iso(offer.offered_at),
+        "amount": _decimal(offer.amount),
+        "currency": str(_enum_value(offer.currency)),
+        "offer_type": offer.offer_type,
+        "conditions": _json_safe(offer.conditions_json),
+        "status": str(_enum_value(offer.status)),
+        "seller_response_at": _iso(offer.seller_response_at),
+        "counteroffer_amount": _decimal(offer.counteroffer_amount),
+        "notes": offer.notes,
+        "created_at": _iso(offer.created_at),
+        "updated_at": _iso(offer.updated_at),
+    }
+
+
+def _serialize_skip_record(skip_record: SkipRecord) -> dict[str, Any]:
+    return {
+        "skip_record_id": str(skip_record.id),
+        "property_id": str(skip_record.property_id),
+        "reason_code": str(_enum_value(skip_record.reason_code)),
+        "notes": skip_record.notes,
+        "skipped_at": _iso(skip_record.skipped_at),
+    }
+
+
+def _serialize_outcome(outcome: PropertyOutcome) -> dict[str, Any]:
+    return {
+        "outcome_id": str(outcome.id),
+        "property_id": str(outcome.property_id),
+        "outcome_type": str(_enum_value(outcome.outcome_type)),
+        "outcome_date": _iso(outcome.outcome_date),
+        "sale_price": _decimal(outcome.sale_price),
+        "currency": str(_enum_value(outcome.currency)) if outcome.currency else None,
+        "confidence": _decimal(outcome.confidence),
+        "source_kind": str(_enum_value(outcome.source_kind)) if outcome.source_kind else None,
+        "source_reference": outcome.source_reference,
+        "notes": outcome.notes,
+        "created_at": _iso(outcome.created_at),
+    }
+
+
+def _serialize_override(override: PropertyOverride) -> dict[str, Any]:
+    return {
+        "override_id": str(override.id),
+        "property_id": str(override.property_id),
+        "field_name": override.field_name,
+        "value": _json_safe(override.value_json),
+        "source_kind": str(_enum_value(override.source_kind)),
+        "source_reference": override.source_reference,
+        "reason": override.reason,
+        "created_at": _iso(override.created_at),
+        "updated_at": _iso(override.updated_at),
+    }
+
+
+def _serialize_pipeline_event(event: PipelineStatusEvent | None) -> dict[str, Any] | None:
+    if event is None:
+        return None
+    return {
+        "pipeline_status_event_id": str(event.id),
+        "property_id": str(event.property_id),
+        "old_status": str(_enum_value(event.old_status)) if event.old_status else None,
+        "new_status": str(_enum_value(event.new_status)),
+        "source_kind": str(_enum_value(event.source_kind)),
+        "source_reference": event.source_reference,
+        "reason": event.reason,
+        "occurred_at": _iso(event.occurred_at),
+        "created_at": _iso(event.created_at),
     }
 
 
@@ -892,6 +1175,162 @@ def get_watchlist(
     }
 
 
+def _latest_interaction_for_property(
+    session: Session, property_id: uuid.UUID
+) -> Interaction | None:
+    return session.scalars(
+        select(Interaction)
+        .where(Interaction.property_id == property_id)
+        .order_by(Interaction.occurred_at.desc(), Interaction.created_at.desc())
+    ).first()
+
+
+def _next_follow_up_for_property(session: Session, property_id: uuid.UUID) -> Interaction | None:
+    return session.scalars(
+        select(Interaction)
+        .where(
+            Interaction.property_id == property_id,
+            Interaction.follow_up_at.is_not(None),
+        )
+        .order_by(Interaction.follow_up_at.asc(), Interaction.occurred_at.desc())
+    ).first()
+
+
+def _latest_review_for_property(session: Session, property_id: uuid.UUID) -> PropertyReview | None:
+    return session.scalars(
+        select(PropertyReview)
+        .where(PropertyReview.property_id == property_id)
+        .order_by(PropertyReview.reviewed_at.desc(), PropertyReview.created_at.desc())
+    ).first()
+
+
+def _latest_offer_for_property(session: Session, property_id: uuid.UUID) -> Offer | None:
+    return session.scalars(
+        select(Offer)
+        .where(Offer.property_id == property_id)
+        .order_by(Offer.offered_at.desc(), Offer.created_at.desc())
+    ).first()
+
+
+def _latest_skip_for_property(session: Session, property_id: uuid.UUID) -> SkipRecord | None:
+    return session.scalars(
+        select(SkipRecord)
+        .where(SkipRecord.property_id == property_id)
+        .order_by(SkipRecord.skipped_at.desc(), SkipRecord.id.desc())
+    ).first()
+
+
+def _latest_outcome_for_property(
+    session: Session, property_id: uuid.UUID
+) -> PropertyOutcome | None:
+    return session.scalars(
+        select(PropertyOutcome)
+        .where(PropertyOutcome.property_id == property_id)
+        .order_by(PropertyOutcome.outcome_date.desc(), PropertyOutcome.created_at.desc())
+    ).first()
+
+
+def _serialize_pipeline_item(session: Session, property_: Property) -> dict[str, Any]:
+    listing_rows = _listing_rows(session, property_.id)
+    current_listing, current_source = listing_rows[0] if listing_rows else (None, None)
+    opportunity = _latest_for_property(session, OpportunityAssessment, property_.id)
+    deal = _latest_for_property(session, DealAnalysis, property_.id)
+    risk = _latest_for_property(session, RiskAssessment, property_.id)
+    feature = _latest_feature_for_property(session, property_.id)
+    latest_event_at = _latest_listing_input_at(session, property_.id)
+    item = _serialize_property_list_item(
+        property_,
+        opportunity,
+        deal,
+        risk,
+        feature,
+        current_listing,
+        current_source,
+        latest_event_at,
+    )
+    latest_interaction = _latest_interaction_for_property(session, property_.id)
+    next_follow_up = _next_follow_up_for_property(session, property_.id)
+    latest_review = _latest_review_for_property(session, property_.id)
+    latest_offer = _latest_offer_for_property(session, property_.id)
+    latest_skip = _latest_skip_for_property(session, property_.id)
+    latest_outcome = _latest_outcome_for_property(session, property_.id)
+    item["pipeline"] = {
+        "status": str(_enum_value(property_.pipeline_status)),
+        "status_updated_at": _iso(property_.pipeline_status_updated_at),
+        "latest_review": _serialize_review(latest_review) if latest_review else None,
+        "latest_interaction": (
+            _serialize_interaction(latest_interaction) if latest_interaction else None
+        ),
+        "next_follow_up": _serialize_interaction(next_follow_up) if next_follow_up else None,
+        "latest_offer": _serialize_offer(latest_offer) if latest_offer else None,
+        "latest_skip": _serialize_skip_record(latest_skip) if latest_skip else None,
+        "latest_outcome": _serialize_outcome(latest_outcome) if latest_outcome else None,
+    }
+    return item
+
+
+@router.get("/pipeline")
+def get_pipeline(
+    session: DbSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 50,
+    pipeline_status: PropertyPipelineStatus | None = None,
+) -> dict[str, Any]:
+    stmt = select(Property)
+    if pipeline_status is not None:
+        stmt = stmt.where(Property.pipeline_status == pipeline_status)
+    total = _count_from_stmt(session, stmt)
+    rows = session.scalars(
+        stmt.order_by(
+            Property.pipeline_status.asc(),
+            Property.pipeline_status_updated_at.desc().nullslast(),
+            Property.updated_at.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+    summary_rows = session.execute(
+        select(Property.pipeline_status, func.count()).group_by(Property.pipeline_status)
+    ).all()
+    return {
+        "items": [_serialize_pipeline_item(session, property_) for property_ in rows],
+        "pagination": _pagination(page, page_size, total),
+        "summary": {str(_enum_value(row_status)): count for row_status, count in summary_rows},
+    }
+
+
+def _command_response(
+    status_value: str,
+    *,
+    property_: Property,
+    record: dict[str, Any],
+    pipeline_event: PipelineStatusEvent | None,
+    invalidated_modules: Iterable[str] = (),
+    reanalyzed_modules: Iterable[str] = (),
+) -> dict[str, Any]:
+    return {
+        "status": status_value,
+        "property_id": str(property_.id),
+        "pipeline_status": str(_enum_value(property_.pipeline_status)),
+        "pipeline_status_updated_at": _iso(property_.pipeline_status_updated_at),
+        "pipeline_event": _serialize_pipeline_event(pipeline_event),
+        "invalidated_modules": list(invalidated_modules),
+        "reanalyzed_modules": list(reanalyzed_modules),
+        "record": record,
+    }
+
+
+def _load_offer(session: Session, offer_id: uuid.UUID) -> Offer:
+    offer = session.get(Offer, offer_id)
+    if offer is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Offer not found.")
+    return offer
+
+
+def _service_422(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+
+
 @router.post("/properties/{property_id}/watch", status_code=status.HTTP_201_CREATED)
 def watch_property(
     session: DbSession,
@@ -927,6 +1366,247 @@ def unwatch_property(session: DbSession, property_id: uuid.UUID) -> dict[str, An
 def reanalyze_property(session: DbSession, property_id: uuid.UUID) -> dict[str, Any]:
     property_ = _load_property(session, property_id)
     return queue_manual_reanalysis(session, property_, commit=True)
+
+
+@router.post("/properties/{property_id}/review", status_code=status.HTTP_201_CREATED)
+def review_property(
+    session: DbSession,
+    property_id: uuid.UUID,
+    payload: ReviewRequest,
+) -> dict[str, Any]:
+    property_ = _load_property(session, property_id)
+    result = record_property_review(
+        session,
+        property_,
+        decision=payload.decision,
+        reviewed_at=payload.reviewed_at,
+        manual_fmv=payload.manual_fmv,
+        manual_fast_sale_value=payload.manual_fast_sale_value,
+        manual_max_buy_price=payload.manual_max_buy_price,
+        notes=payload.notes,
+        commit=True,
+    )
+    return _command_response(
+        "RECORDED",
+        property_=property_,
+        record=_serialize_review(result.record),
+        pipeline_event=result.pipeline_event,
+        invalidated_modules=result.invalidated_modules,
+        reanalyzed_modules=result.reanalyzed_modules,
+    )
+
+
+@router.patch("/properties/{property_id}/pipeline-status")
+def patch_pipeline_status(
+    session: DbSession,
+    property_id: uuid.UUID,
+    payload: PipelineStatusRequest,
+) -> dict[str, Any]:
+    property_ = _load_property(session, property_id)
+    event = set_pipeline_status(
+        session,
+        property_,
+        payload.status,
+        reason=payload.reason or "manual_pipeline_status",
+        commit=True,
+    )
+    return _command_response(
+        "UPDATED",
+        property_=property_,
+        record={"status": str(_enum_value(property_.pipeline_status))},
+        pipeline_event=event,
+    )
+
+
+@router.post("/properties/{property_id}/interactions/call", status_code=status.HTTP_201_CREATED)
+def create_call_interaction(
+    session: DbSession,
+    property_id: uuid.UUID,
+    payload: CallFeedbackRequest,
+) -> dict[str, Any]:
+    property_ = _load_property(session, property_id)
+    result = log_call_feedback(
+        session,
+        property_,
+        occurred_at=payload.occurred_at,
+        seller_motivation=payload.seller_motivation,
+        reason_for_sale=payload.reason_for_sale,
+        lowest_indicated_price=payload.lowest_indicated_price,
+        cash_preferred=payload.cash_preferred,
+        desired_closing_days=payload.desired_closing_days,
+        viewing_available=payload.viewing_available,
+        claimed_registered=payload.claimed_registered,
+        claimed_owner_1_1=payload.claimed_owner_1_1,
+        claimed_mortgage=payload.claimed_mortgage,
+        tenant_present=payload.tenant_present,
+        structured_notes=payload.structured_notes,
+        notes=payload.notes,
+        follow_up_at=payload.follow_up_at,
+        follow_up_notes=payload.follow_up_notes,
+        commit=True,
+    )
+    return _command_response(
+        "RECORDED",
+        property_=property_,
+        record=_serialize_interaction(result.record),
+        pipeline_event=result.pipeline_event,
+        invalidated_modules=result.invalidated_modules,
+        reanalyzed_modules=result.reanalyzed_modules,
+    )
+
+
+@router.post("/properties/{property_id}/interactions/visit", status_code=status.HTTP_201_CREATED)
+def create_visit_interaction(
+    session: DbSession,
+    property_id: uuid.UUID,
+    payload: VisitFeedbackRequest,
+) -> dict[str, Any]:
+    property_ = _load_property(session, property_id)
+    try:
+        result = log_visit_feedback(
+            session,
+            property_,
+            occurred_at=payload.occurred_at,
+            condition_category=payload.condition_category,
+            estimated_renovation_low=payload.estimated_renovation_low,
+            estimated_renovation_base=payload.estimated_renovation_base,
+            estimated_renovation_high=payload.estimated_renovation_high,
+            layout_score=payload.layout_score,
+            light_score=payload.light_score,
+            noise_score=payload.noise_score,
+            building_score=payload.building_score,
+            entrance_score=payload.entrance_score,
+            parking_score=payload.parking_score,
+            elevator_verified=payload.elevator_verified,
+            visible_defects=payload.visible_defects,
+            manual_fmv=payload.manual_fmv,
+            manual_fast_sale_value=payload.manual_fast_sale_value,
+            manual_max_buy_price=payload.manual_max_buy_price,
+            notes=payload.notes,
+            follow_up_at=payload.follow_up_at,
+            follow_up_notes=payload.follow_up_notes,
+            commit=True,
+        )
+    except ValueError as exc:
+        raise _service_422(exc) from exc
+    return _command_response(
+        "RECORDED",
+        property_=property_,
+        record=_serialize_interaction(result.record),
+        pipeline_event=result.pipeline_event,
+        invalidated_modules=result.invalidated_modules,
+        reanalyzed_modules=result.reanalyzed_modules,
+    )
+
+
+@router.post("/properties/{property_id}/offers", status_code=status.HTTP_201_CREATED)
+def post_offer(
+    session: DbSession,
+    property_id: uuid.UUID,
+    payload: OfferCreateRequest,
+) -> dict[str, Any]:
+    property_ = _load_property(session, property_id)
+    try:
+        result = create_offer(
+            session,
+            property_,
+            amount=payload.amount,
+            currency=payload.currency,
+            offered_at=payload.offered_at,
+            offer_type=payload.offer_type,
+            conditions=payload.conditions,
+            status=payload.status,
+            seller_response_at=payload.seller_response_at,
+            counteroffer_amount=payload.counteroffer_amount,
+            notes=payload.notes,
+            commit=True,
+        )
+    except ValueError as exc:
+        raise _service_422(exc) from exc
+    return _command_response(
+        "RECORDED",
+        property_=property_,
+        record=_serialize_offer(result.record),
+        pipeline_event=result.pipeline_event,
+    )
+
+
+@router.patch("/offers/{offer_id}")
+def patch_offer(
+    session: DbSession,
+    offer_id: uuid.UUID,
+    payload: OfferPatchRequest,
+) -> dict[str, Any]:
+    offer = _load_offer(session, offer_id)
+    try:
+        result = update_offer(
+            session,
+            offer,
+            status=payload.status,
+            seller_response_at=payload.seller_response_at,
+            counteroffer_amount=payload.counteroffer_amount,
+            notes=payload.notes,
+            commit=True,
+        )
+    except ValueError as exc:
+        raise _service_422(exc) from exc
+    return _command_response(
+        "UPDATED",
+        property_=offer.property,
+        record=_serialize_offer(result.record),
+        pipeline_event=result.pipeline_event,
+    )
+
+
+@router.post("/properties/{property_id}/skip", status_code=status.HTTP_201_CREATED)
+def post_skip(
+    session: DbSession,
+    property_id: uuid.UUID,
+    payload: SkipRequest,
+) -> dict[str, Any]:
+    property_ = _load_property(session, property_id)
+    result = skip_property(
+        session,
+        property_,
+        reason_code=payload.reason_code,
+        notes=payload.notes,
+        skipped_at=payload.skipped_at,
+        commit=True,
+    )
+    return _command_response(
+        "RECORDED",
+        property_=property_,
+        record=_serialize_skip_record(result.record),
+        pipeline_event=result.pipeline_event,
+    )
+
+
+@router.post("/properties/{property_id}/outcomes", status_code=status.HTTP_201_CREATED)
+def post_outcome(
+    session: DbSession,
+    property_id: uuid.UUID,
+    payload: OutcomeRequest,
+) -> dict[str, Any]:
+    property_ = _load_property(session, property_id)
+    result = record_property_outcome(
+        session,
+        property_,
+        outcome_type=payload.outcome_type,
+        outcome_date=payload.outcome_date,
+        sale_price=payload.sale_price,
+        currency=payload.currency,
+        confidence=payload.confidence,
+        source_kind=payload.source_kind,
+        source_reference=payload.source_reference,
+        notes=payload.notes,
+        commit=True,
+    )
+    return _command_response(
+        "RECORDED",
+        property_=property_,
+        record=_serialize_outcome(result.record),
+        pipeline_event=result.pipeline_event,
+    )
 
 
 def _serialize_property_list_item(
@@ -1319,6 +1999,149 @@ def _watch_detail(session: Session, property_: Property) -> dict[str, Any]:
     }
 
 
+def _acquisition_detail(session: Session, property_: Property) -> dict[str, Any]:
+    reviews = session.scalars(
+        select(PropertyReview)
+        .where(PropertyReview.property_id == property_.id)
+        .order_by(PropertyReview.reviewed_at.desc(), PropertyReview.created_at.desc())
+        .limit(10)
+    ).all()
+    interactions = session.scalars(
+        select(Interaction)
+        .where(Interaction.property_id == property_.id)
+        .order_by(Interaction.occurred_at.desc(), Interaction.created_at.desc())
+        .limit(20)
+    ).all()
+    offers = session.scalars(
+        select(Offer)
+        .where(Offer.property_id == property_.id)
+        .order_by(Offer.offered_at.desc(), Offer.created_at.desc())
+        .limit(20)
+    ).all()
+    skip_records = session.scalars(
+        select(SkipRecord)
+        .where(SkipRecord.property_id == property_.id)
+        .order_by(SkipRecord.skipped_at.desc())
+        .limit(10)
+    ).all()
+    outcomes = session.scalars(
+        select(PropertyOutcome)
+        .where(PropertyOutcome.property_id == property_.id)
+        .order_by(PropertyOutcome.outcome_date.desc(), PropertyOutcome.created_at.desc())
+        .limit(10)
+    ).all()
+    overrides = session.scalars(
+        select(PropertyOverride)
+        .where(PropertyOverride.property_id == property_.id)
+        .order_by(PropertyOverride.created_at.desc(), PropertyOverride.id.desc())
+        .limit(20)
+    ).all()
+    pipeline_events = session.scalars(
+        select(PipelineStatusEvent)
+        .where(PipelineStatusEvent.property_id == property_.id)
+        .order_by(PipelineStatusEvent.occurred_at.desc(), PipelineStatusEvent.created_at.desc())
+        .limit(20)
+    ).all()
+    return {
+        "pipeline_status": str(_enum_value(property_.pipeline_status)),
+        "pipeline_status_updated_at": _iso(property_.pipeline_status_updated_at),
+        "reviews": [_serialize_review(review) for review in reviews],
+        "interactions": [_serialize_interaction(interaction) for interaction in interactions],
+        "offers": [_serialize_offer(offer) for offer in offers],
+        "skip_records": [_serialize_skip_record(skip_record) for skip_record in skip_records],
+        "outcomes": [_serialize_outcome(outcome) for outcome in outcomes],
+        "overrides": [_serialize_override(override) for override in overrides],
+        "pipeline_events": [
+            event_payload
+            for event in pipeline_events
+            if (event_payload := _serialize_pipeline_event(event)) is not None
+        ],
+        "timeline": _acquisition_timeline(
+            reviews=reviews,
+            interactions=interactions,
+            offers=offers,
+            skip_records=skip_records,
+            outcomes=outcomes,
+            pipeline_events=pipeline_events,
+        ),
+    }
+
+
+def _acquisition_timeline(
+    *,
+    reviews: Iterable[PropertyReview],
+    interactions: Iterable[Interaction],
+    offers: Iterable[Offer],
+    skip_records: Iterable[SkipRecord],
+    outcomes: Iterable[PropertyOutcome],
+    pipeline_events: Iterable[PipelineStatusEvent],
+) -> list[dict[str, Any]]:
+    timeline: list[dict[str, Any]] = []
+    for review in reviews:
+        timeline.append(
+            {
+                "type": "REVIEW",
+                "occurred_at": _iso(review.reviewed_at),
+                "summary": str(_enum_value(review.decision)),
+                "record_id": str(review.id),
+                "notes": review.notes,
+            }
+        )
+    for interaction in interactions:
+        timeline.append(
+            {
+                "type": str(_enum_value(interaction.interaction_type)),
+                "occurred_at": _iso(interaction.occurred_at),
+                "summary": str(_enum_value(interaction.interaction_type)),
+                "record_id": str(interaction.id),
+                "notes": interaction.notes,
+                "follow_up_at": _iso(interaction.follow_up_at),
+                "follow_up_notes": interaction.follow_up_notes,
+            }
+        )
+    for offer in offers:
+        timeline.append(
+            {
+                "type": "OFFER",
+                "occurred_at": _iso(offer.offered_at),
+                "summary": f"{offer.amount} {offer.currency.value} {offer.status.value}",
+                "record_id": str(offer.id),
+                "notes": offer.notes,
+            }
+        )
+    for skip_record in skip_records:
+        timeline.append(
+            {
+                "type": "SKIP",
+                "occurred_at": _iso(skip_record.skipped_at),
+                "summary": str(_enum_value(skip_record.reason_code)),
+                "record_id": str(skip_record.id),
+                "notes": skip_record.notes,
+            }
+        )
+    for outcome in outcomes:
+        timeline.append(
+            {
+                "type": "OUTCOME",
+                "occurred_at": _iso(outcome.outcome_date),
+                "summary": str(_enum_value(outcome.outcome_type)),
+                "record_id": str(outcome.id),
+                "notes": outcome.notes,
+            }
+        )
+    for event in pipeline_events:
+        timeline.append(
+            {
+                "type": "PIPELINE_STATUS",
+                "occurred_at": _iso(event.occurred_at),
+                "summary": f"{_enum_value(event.old_status)} -> {_enum_value(event.new_status)}",
+                "record_id": str(event.id),
+                "notes": event.reason,
+            }
+        )
+    return sorted(timeline, key=lambda item: item["occurred_at"] or "", reverse=True)
+
+
 def _serialize_valuation(valuation: Valuation | None, status_value: str) -> dict[str, Any]:
     if valuation is None:
         return {"status": status_value}
@@ -1659,6 +2482,7 @@ def get_property_detail(session: DbSession, property_id: uuid.UUID) -> dict[str,
         "listings": [_serialize_listing(listing, source) for listing, source in listing_rows],
         "history": _history_items(session, property_id),
         "watch": _watch_detail(session, property_),
+        "acquisition": _acquisition_detail(session, property_),
         "comparables": _serialize_comparables(session, comparable_set, statuses["comparables"]),
         "valuation": _serialize_valuation(valuation, statuses["valuation"]),
         "liquidity": _serialize_liquidity(

@@ -8,11 +8,11 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 13 - Acquisition CRM & Human Feedback
-    Current task: Phase 13 - implement acquisition workflow persistence, commands, API/UI, and manual-feedback reanalysis
+    Current phase: PHASE 14 - Reliability, Monitoring & Production Hardening
+    Current task: Phase 14 - implement reliability, monitoring, and production-hardening foundation
     Task state: READY
 
-Phase 12 is complete.
+Phase 13 is complete.
 
 ## Completed Phases
 
@@ -29,10 +29,11 @@ Phase 12 is complete.
     PHASE 10 - Opportunity Engine & Telegram Alerts: COMPLETED
     PHASE 11 - First Usable Dashboard: COMPLETED
     PHASE 12 - Watchlist, Reanalysis & Change Intelligence: COMPLETED
+    PHASE 13 - Acquisition CRM & Human Feedback: COMPLETED
 
 ## Completed Tasks
 
-- Phase 12 watchlist/reanalysis/change intelligence is implemented and verified: watch rules, What Changed, selective stale-state invalidation, automatic downstream reanalysis, Watch-to-CALL action upgrade, Telegram alert decision on fresh deal analysis, API/UI integration, and backend/frontend tests/checks.
+- Phase 13 acquisition CRM and human feedback is implemented and verified: workflow persistence, pipeline commands, reviews, call/visit feedback, offers, skips, outcomes, manual overrides, manual feedback precedence, selective downstream reanalysis, API/UI integration, and backend/frontend tests/checks.
 
 ## Current Implementation Facts
 
@@ -40,9 +41,9 @@ Phase 12 is complete.
 - Backend configuration: centralized settings in `backend/app/core/config.py`, loaded from environment variables and optional root `.env`.
 - Backend logging: basic startup logging exists and does not log secrets.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
-- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, `RiskGateEffect`, `DealAnalysisStatus`, `DealScenarioType`, `OpportunityAction`, `AlertChannel`, `AlertType`, `AlertStatus`, `WatchRuleType`, and `AnalysisStatus` exist in `backend/app/domain/enums.py`.
-- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, `CostProfile`, `InvestmentProfile`, `DealAnalysis`, `DealScenario`, `OpportunityAssessment`, `Alert`, `PropertyAnalysisState`, `WatchRule`, `WatchTriggerEvent`, and `JobRun` exist in `backend/app/db/models.py`.
-- Migrations: Alembic is configured; current head is `0012_watchlist_reanalysis`.
+- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, `RiskGateEffect`, `DealAnalysisStatus`, `DealScenarioType`, `OpportunityAction`, `AlertChannel`, `AlertType`, `AlertStatus`, `WatchRuleType`, `AnalysisStatus`, `PropertyReviewDecision`, `InteractionType`, `OfferStatus`, `SkipReasonCode`, and `PropertyOutcomeType` exist in `backend/app/domain/enums.py`.
+- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, `CostProfile`, `InvestmentProfile`, `DealAnalysis`, `DealScenario`, `OpportunityAssessment`, `Alert`, `PropertyAnalysisState`, `WatchRule`, `WatchTriggerEvent`, `JobRun`, `PropertyReview`, `Interaction`, `CallFeedback`, `VisitFeedback`, `Offer`, `SkipRecord`, `PropertyOutcome`, `PropertyOverride`, and `PipelineStatusEvent` exist in `backend/app/db/models.py`.
+- Migrations: Alembic is configured; current head is `0013_acquisition_crm`.
 - Bootstrap sources: migrations seed stable `manual` and `four_zida` sources with `source_runtime_state` rows.
 - Critical listing invariant: `listings` enforces `UNIQUE(source_id, external_listing_id)`.
 - `listing_raw_records` stores deduped CARD/DETAIL raw payloads by listing, record type, and content hash.
@@ -116,15 +117,18 @@ Phase 12 is complete.
 - Seller changes invalidate and refresh seller/risk/deal/opportunity.
 - Watch trigger history is persisted in `watch_trigger_events`; repeated evaluation of the same unchanged listing event does not create duplicate trigger rows, reanalysis rows, or alerts.
 - 4zida ingestion now emits `DESCRIPTION_CHANGED` and `SELLER_CHANGED` listing events when already-normalized fields change and passes created listing events through watch evaluation.
-- Dashboard API: `backend/app/api/dashboard.py` exposes `GET /api/v1/action-queue`, `GET /api/v1/properties`, `GET /api/v1/properties/{id}`, `GET /api/v1/properties/{id}/history`, `GET /api/v1/watchlist`, `POST /api/v1/properties/{id}/watch`, `DELETE /api/v1/properties/{id}/watch`, `POST /api/v1/properties/{id}/reanalyze`, `GET /api/v1/sources`, and `GET /api/v1/settings`.
+- Acquisition workflow module: `backend/app/acquisition/acquisition_service.py` implements review, pipeline-status, call feedback, visit feedback, offer, skip, and outcome commands with auditable pipeline status events.
+- Call feedback is used as persisted manual seller/risk input during seller/risk reanalysis; visit feedback records verified manual overrides for relevant property facts without overwriting listing history.
+- Phase 13 reanalysis preserves historical analytical rows and creates new downstream seller/risk/deal/opportunity rows when relevant manual feedback is recorded; property-fact changes from verified visits can also refresh features/comparables/valuation/liquidity/fast-sale.
+- Dashboard API: `backend/app/api/dashboard.py` exposes `GET /api/v1/action-queue`, `GET /api/v1/properties`, `GET /api/v1/properties/{id}`, `GET /api/v1/properties/{id}/history`, `GET /api/v1/watchlist`, `GET /api/v1/pipeline`, `POST /api/v1/properties/{id}/watch`, `DELETE /api/v1/properties/{id}/watch`, `POST /api/v1/properties/{id}/reanalyze`, `POST /api/v1/properties/{id}/review`, `PATCH /api/v1/properties/{id}/pipeline-status`, `POST /api/v1/properties/{id}/interactions/call`, `POST /api/v1/properties/{id}/interactions/visit`, `POST /api/v1/properties/{id}/offers`, `PATCH /api/v1/offers/{id}`, `POST /api/v1/properties/{id}/skip`, `POST /api/v1/properties/{id}/outcomes`, `GET /api/v1/sources`, and `GET /api/v1/settings`.
 - API access: `backend/app/api/dependencies.py` provides DB-session dependency and a single-user bearer-token guard. If `API_ACCESS_TOKEN` is configured it is required; production fails closed when the token is missing. Local development/test can run without a token.
 - API routing/CORS: `backend/app/main.py` registers `/api/v1/health`, the dashboard router, non-wildcard CORS origins from `CORS_ALLOWED_ORIGINS`, and CORS methods required by the current dashboard writes.
 - Action Queue API uses backend opportunity/deal/valuation/liquidity/risk read models, excludes `IGNORE` by default, returns summary counts, source warnings, pagination, whitelist sorting/filtering, and preserves `null` as UNKNOWN.
 - Property Detail API returns decision header, listings, listing history, Watch/What Changed data, comparables, valuation, liquidity/fast-sale, seller, risk flags, deal economics/scenarios/costs, and freshness/statuses. When `property_analysis_state` exists it drives selective current statuses; otherwise stale display falls back to listing inputs newer than analysis `as_of`. Historical rows are not overwritten.
 - Source Health API returns one row per source with runtime state, latest job summary, recent errors, parse health, enabled state, and dashboard warnings.
 - Settings API is read-only and reports investment/cost profile summaries, notification/configuration booleans, CORS origins, and source counts without exposing secret values.
-- Frontend dashboard: `frontend/src/App.tsx` implements Action Queue, Properties, Watchlist, Property Detail, Source Health, and Settings routes against the implemented `/api/v1` contracts.
-- Property Detail UI includes Watch/Unwatch/Reanalyze commands and a What Changed section backed by `watch_trigger_events`.
+- Frontend dashboard: `frontend/src/App.tsx` implements Action Queue, Properties, Watchlist, Pipeline, Property Detail, Source Health, and Settings routes against the implemented `/api/v1` contracts.
+- Property Detail UI includes Watch/Unwatch/Reanalyze commands, acquisition workflow forms for pipeline status, review, call, visit, offer, skip, and outcome, and a What Changed section backed by `watch_trigger_events`.
 - Frontend API client stores the optional private API token in session storage and never hardcodes a token in source.
 - Frontend status/format helpers preserve UNKNOWN instead of converting it to zero/false/empty display values and render STALE/FAILED/BLOCK as explicit text statuses.
 - Parser fixtures exist under `backend/tests/fixtures/four_zida` and do not depend on live portal state.
@@ -132,6 +136,7 @@ Phase 12 is complete.
 - Backend tests also cover Phase 10 action classification, hard gates, confidence/downside thresholds, reason codes, ranking, full opportunity-to-notification flow, alert lifecycle, retry, dedupe, action upgrade, and operational/opportunity alert separation.
 - Backend tests also cover Phase 11 private API auth, Action Queue contract, empty queue, no obvious Action Queue N+1 query pattern, Property Detail UNKNOWN/STALE/BLOCK/history/analysis sections, Source Health, Settings secrecy, and `/api/v1/health`.
 - Backend tests also cover Phase 12 watch-rule persistence/API, Watchlist API, trigger dedupe, selective price/description/seller invalidation, historical reanalysis preservation, Watch-to-CALL upgrade, fresh deal-based Telegram alert decisions, and manual reanalysis queue response.
+- Backend tests also cover Phase 13 acquisition workflow table creation, alert-to-review-call-visit-offer-outcome flow, pipeline API, validation/not-found cases, manual call precedence, verified visit overrides, feedback-triggered reanalysis, skip atomicity, and separate historical persistence tables.
 - Frontend tests cover UNKNOWN rendering, critical status formatting for STALE/FAILED/BLOCK, and watch-trigger formatting. Frontend build/typecheck is configured through `npm run build`; no separate frontend lint script exists.
 - Health endpoints: `GET /health` and `GET /api/v1/health` check application process, PostgreSQL connectivity, and PostGIS availability.
 - Frontend: Vite React dashboard exists under `frontend`.
@@ -158,22 +163,22 @@ Phase 12 is complete.
 
 Implement only:
 
-    PHASE 13 - Acquisition CRM & Human Feedback
+    PHASE 14 - Reliability, Monitoring & Production Hardening
 
 Exact first logical task:
 
-    Implement acquisition workflow persistence and backend application commands
-    for review, call/visit feedback, offers, skip records, manual estimates,
-    notes, and pipeline status transitions, preserving manual precedence and
-    triggering selective downstream reanalysis where Phase 13 requires it.
+    Implement the reliability and recovery foundation for current API, crawler,
+    analysis, Telegram, and database workflows: restart safety, outage handling,
+    source/job health hardening, backup/restore workflow, log retention, security,
+    resource limits, and practical integration tests/documentation.
 
 Do not implement:
 
-- Phase 14 reliability, monitoring, or production-hardening work;
-- generic CRM or kanban workflow beyond acquisition-specific Phase 13 scope;
-- portfolio/transaction import;
-- multi-channel notification infrastructure beyond existing Telegram alerts unless Phase 13 explicitly requires it;
-- additional markets or sources.
+- Phase 15 second-source/cross-portal validation;
+- Phase 16 historical evaluation or shadow portfolio;
+- Phase 17 transaction data enrichment;
+- new market expansion;
+- large infrastructure redesign beyond the modular monolith.
 
 ## Required Context
 
@@ -184,68 +189,58 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 13 - Acquisition CRM & Human Feedback
+    -> PHASE 14 - Reliability, Monitoring & Production Hardening
 
 Relevant specification sections only:
 
-    docs/03-data-model.md
-    -> property_reviews
-    -> interactions
-    -> call_feedback
-    -> visit_feedback
-    -> offers
-    -> skip_records
-    -> property_outcomes
-    -> property_overrides
-    -> manual precedence
+    docs/09-deployment-operations.md
+    -> runtime/process management
+    -> backups and restore
+    -> logging/retention
+    -> security/configuration
 
-    docs/05-analysis-specification.md
-    -> manual precedence
-    -> seller feedback
-    -> risk/deal re-analysis
-
-    docs/06-api-ui-specification.md
-    -> Pipeline
-    -> Log Call
-    -> Log Visit
-    -> Offers
-    -> Skip
-    -> related APIs
+    docs/04-scraping-specification.md
+    -> Source Health
+    -> failure isolation
+    -> recovery
+    -> anomaly handling
 
     docs/08-testing-specification.md
-    -> Phase 13 acquisition workflow/manual feedback tests
+    -> reliability
+    -> recovery
+    -> integration tests
 
 Existing implementation to inspect:
 
     backend/app/api/
     backend/app/db/models.py
     backend/app/analysis/
-    backend/app/watchlist/
-    backend/app/opportunities/
-    backend/app/deals/
-    backend/app/valuation/
-    backend/app/liquidity/
-    backend/app/intelligence/
-    backend/app/ingestion/
     backend/app/crawling/
+    backend/app/ingestion/
+    backend/app/intelligence/
+    backend/app/opportunities/
+    backend/app/watchlist/
     frontend/
     backend/tests/
 
-Do not load Phase 14+ specifications unless a concrete Phase 13 dependency requires them.
+Do not load Phase 15+ specifications unless a concrete Phase 14 dependency requires them.
 
-## Phase 13 Completion Gate
+## Phase 14 Completion Gate
 
-Phase 13 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
+Phase 14 may be marked `COMPLETED` only when its acceptance criteria from `docs/07-phase-plan.md` are satisfied.
 
 At minimum verify:
 
-- acquisition-specific workflow records are persisted with history;
-- pipeline transitions, reviews, call/visit feedback, offers, skips, manual estimates, and notes work through backend commands/API/UI;
-- manual inputs preserve canonical precedence and do not overwrite historical automatic analysis;
-- relevant manual feedback selectively invalidates or refreshes downstream analysis;
-- skip behavior is atomic and auditable.
+- API restart safety;
+- worker/crawler restart safety;
+- temporary DB failure handling;
+- temporary source outage handling;
+- LLM outage handling;
+- Telegram outage handling;
+- recovery behavior is documented and tested where practical;
+- backup/restore workflow is implemented or clearly documented per Phase 14 scope.
 
-Do not implement Phase 14 reliability/monitoring/production-hardening behavior.
+Do not implement Phase 15 second-source behavior.
 
 ## Update Rules
 

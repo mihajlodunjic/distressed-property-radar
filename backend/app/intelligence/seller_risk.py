@@ -8,6 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    CallFeedback,
+    Interaction,
     Listing,
     ListingEvent,
     LlmAnalysis,
@@ -16,6 +18,7 @@ from app.db.models import (
     RiskAssessment,
     RiskFlag,
     SellerAssessment,
+    VisitFeedback,
 )
 from app.domain.enums import (
     AnalysisLevel,
@@ -148,6 +151,16 @@ def assess_seller_intelligence_and_risk(
     commit: bool = False,
 ) -> SellerRiskRunResult:
     analysis_as_of = _aware_datetime(as_of or _utcnow())
+    effective_manual_seller_input = (
+        manual_seller_input
+        if manual_seller_input is not None
+        else _latest_manual_seller_input(session, property_, analysis_as_of)
+    )
+    effective_manual_risk_inputs = (
+        manual_risk_inputs
+        if manual_risk_inputs is not None
+        else _manual_risk_inputs_from_feedback(session, property_, analysis_as_of)
+    )
     market_dataset = recalculate_property_market_dataset(
         session,
         property_,
@@ -163,7 +176,7 @@ def assess_seller_intelligence_and_risk(
         property_,
         market_dataset=market_dataset,
         llm_analyses=successful_llm_analyses,
-        manual_seller_input=manual_seller_input,
+        manual_seller_input=effective_manual_seller_input,
         as_of=analysis_as_of,
     )
     seller_assessment = _persist_seller_assessment(
@@ -177,7 +190,7 @@ def assess_seller_intelligence_and_risk(
         property_,
         market_dataset=market_dataset,
         llm_analyses=successful_llm_analyses,
-        manual_risk_inputs=manual_risk_inputs or [],
+        manual_risk_inputs=effective_manual_risk_inputs,
         as_of=analysis_as_of,
     )
     risk_assessment = _persist_risk_assessment(
@@ -429,6 +442,210 @@ def _latest_successful_llm_analyses(session: Session, property_: Property) -> li
         )
         .order_by(LlmAnalysis.completed_at.desc(), LlmAnalysis.created_at.desc())
     ).all()
+
+
+def _latest_manual_seller_input(
+    session: Session,
+    property_: Property,
+    as_of: datetime,
+) -> ManualSellerInput | None:
+    rows = session.execute(
+        select(CallFeedback, Interaction)
+        .join(Interaction, CallFeedback.interaction_id == Interaction.id)
+        .where(
+            Interaction.property_id == property_.id,
+            Interaction.occurred_at <= as_of,
+        )
+        .order_by(Interaction.occurred_at.desc(), Interaction.created_at.desc())
+    ).all()
+    for feedback, interaction in rows:
+        if _call_feedback_has_seller_signal(feedback):
+            return ManualSellerInput(
+                seller_motivation_level=feedback.seller_motivation,
+                seller_motivation_confidence=_manual_confidence(feedback.seller_motivation),
+                lowest_indicated_price=feedback.lowest_indicated_price,
+                cash_preferred=feedback.cash_preferred,
+                cash_preference_confidence=_manual_confidence(feedback.cash_preferred),
+                reason_for_sale=feedback.reason_for_sale,
+                reason_for_sale_confidence=_manual_confidence(feedback.reason_for_sale),
+                source_kind=DataSourceKind.MANUAL,
+                source_reference=str(interaction.id),
+                evidence=tuple(_manual_evidence("call_feedback", interaction)),
+            )
+    return None
+
+
+def _manual_risk_inputs_from_feedback(
+    session: Session,
+    property_: Property,
+    as_of: datetime,
+) -> list[ManualRiskInput]:
+    inputs: list[ManualRiskInput] = []
+    call_rows = session.execute(
+        select(CallFeedback, Interaction)
+        .join(Interaction, CallFeedback.interaction_id == Interaction.id)
+        .where(
+            Interaction.property_id == property_.id,
+            Interaction.occurred_at <= as_of,
+        )
+        .order_by(Interaction.occurred_at, Interaction.created_at)
+    ).all()
+    for feedback, interaction in call_rows:
+        inputs.extend(_manual_call_risk_inputs(feedback, interaction))
+
+    visit_rows = session.execute(
+        select(VisitFeedback, Interaction)
+        .join(Interaction, VisitFeedback.interaction_id == Interaction.id)
+        .where(
+            Interaction.property_id == property_.id,
+            Interaction.occurred_at <= as_of,
+        )
+        .order_by(Interaction.occurred_at, Interaction.created_at)
+    ).all()
+    for feedback, interaction in visit_rows:
+        inputs.extend(_manual_visit_risk_inputs(feedback, interaction, property_))
+    return inputs
+
+
+def _manual_call_risk_inputs(
+    feedback: CallFeedback,
+    interaction: Interaction,
+) -> list[ManualRiskInput]:
+    evidence = tuple(_manual_evidence("call_feedback", interaction))
+    inputs: list[ManualRiskInput] = []
+    if feedback.claimed_registered is False:
+        inputs.append(
+            ManualRiskInput(
+                code="UNREGISTERED_OR_UNCLEAR",
+                severity=RiskSeverity.HIGH,
+                gate_effect=RiskGateEffect.VERIFY,
+                confidence=Decimal("75.00"),
+                description="Seller call indicated registration or legal status is not confirmed.",
+                evidence=evidence,
+                source_kind=DataSourceKind.MANUAL,
+                source_reference=str(interaction.id),
+            )
+        )
+    if feedback.claimed_owner_1_1 is False:
+        inputs.append(
+            ManualRiskInput(
+                code="PARTIAL_OWNERSHIP",
+                severity=RiskSeverity.CRITICAL,
+                gate_effect=RiskGateEffect.VERIFY,
+                confidence=Decimal("75.00"),
+                description="Seller call indicated ownership may not be 1/1.",
+                evidence=evidence,
+                source_kind=DataSourceKind.MANUAL,
+                source_reference=str(interaction.id),
+            )
+        )
+    if feedback.claimed_mortgage is True:
+        inputs.append(
+            ManualRiskInput(
+                code="MORTGAGE_CLAIMED",
+                severity=RiskSeverity.MEDIUM,
+                gate_effect=RiskGateEffect.VERIFY,
+                confidence=Decimal("70.00"),
+                description="Seller call indicated an active mortgage or lien may exist.",
+                evidence=evidence,
+                source_kind=DataSourceKind.MANUAL,
+                source_reference=str(interaction.id),
+            )
+        )
+    if feedback.tenant_present is True:
+        inputs.append(
+            ManualRiskInput(
+                code="OCCUPIED_PROPERTY",
+                severity=RiskSeverity.HIGH,
+                gate_effect=RiskGateEffect.VERIFY,
+                confidence=Decimal("75.00"),
+                description="Seller call indicated the property may be tenant-occupied.",
+                evidence=evidence,
+                source_kind=DataSourceKind.MANUAL,
+                source_reference=str(interaction.id),
+            )
+        )
+    return inputs
+
+
+def _manual_visit_risk_inputs(
+    feedback: VisitFeedback,
+    interaction: Interaction,
+    property_: Property,
+) -> list[ManualRiskInput]:
+    evidence = tuple(_manual_evidence("visit_feedback", interaction))
+    inputs: list[ManualRiskInput] = []
+    condition = (feedback.condition_category or "").strip().upper()
+    heavy_condition = condition in {"FULL", "RENOVATION", "FOR_RENOVATION", "NEEDS_RENOVATION"}
+    heavy_renovation = (
+        feedback.estimated_renovation_base is not None
+        and feedback.estimated_renovation_base >= Decimal("20000.00")
+    )
+    if heavy_condition or heavy_renovation:
+        inputs.append(
+            ManualRiskInput(
+                code="MAJOR_RENOVATION",
+                severity=RiskSeverity.HIGH,
+                gate_effect=RiskGateEffect.VERIFY,
+                confidence=Decimal("90.00"),
+                description="Visit feedback indicates major renovation risk.",
+                evidence=evidence,
+                source_kind=DataSourceKind.VERIFIED_MANUAL,
+                source_reference=str(interaction.id),
+            )
+        )
+    if feedback.elevator_verified is False and property_.floor is not None and property_.floor >= 3:
+        inputs.append(
+            ManualRiskInput(
+                code="HIGH_FLOOR_NO_ELEVATOR",
+                severity=RiskSeverity.MEDIUM,
+                gate_effect=RiskGateEffect.VERIFY,
+                confidence=Decimal("90.00"),
+                description="Visit verified no elevator on a higher-floor apartment.",
+                evidence=evidence,
+                source_kind=DataSourceKind.VERIFIED_MANUAL,
+                source_reference=str(interaction.id),
+            )
+        )
+    if feedback.visible_defects_json:
+        inputs.append(
+            ManualRiskInput(
+                code="VISIBLE_DEFECTS",
+                severity=RiskSeverity.MEDIUM,
+                gate_effect=RiskGateEffect.VERIFY,
+                confidence=Decimal("85.00"),
+                description="Visit feedback recorded visible defects.",
+                evidence=[*evidence, f"visible_defects={feedback.visible_defects_json!r}"],
+                source_kind=DataSourceKind.VERIFIED_MANUAL,
+                source_reference=str(interaction.id),
+            )
+        )
+    return inputs
+
+
+def _call_feedback_has_seller_signal(feedback: CallFeedback) -> bool:
+    return any(
+        value is not None
+        for value in (
+            feedback.seller_motivation,
+            feedback.reason_for_sale,
+            feedback.lowest_indicated_price,
+            feedback.cash_preferred,
+        )
+    )
+
+
+def _manual_confidence(value: object | None) -> Decimal | None:
+    if value is None:
+        return None
+    return Decimal("90.00")
+
+
+def _manual_evidence(prefix: str, interaction: Interaction) -> list[str]:
+    evidence = [f"{prefix}:{interaction.id}", f"occurred_at:{interaction.occurred_at.isoformat()}"]
+    if _has_text(interaction.notes):
+        evidence.append(f"notes:{interaction.notes}")
+    return evidence
 
 
 def _successful_analyses(analyses: list[LlmAnalysis]) -> list[LlmAnalysis]:

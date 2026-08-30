@@ -28,7 +28,8 @@ a:hover {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -132,7 +133,11 @@ button:hover {
 }
 
 .watch-form input,
-.watch-form select {
+.watch-form select,
+.watch-form textarea,
+.crm-form input,
+.crm-form select,
+.crm-form textarea {
   border: 1px solid #a9b6c5;
   border-radius: 6px;
   min-height: 38px;
@@ -140,10 +145,45 @@ button:hover {
   padding: 8px 10px;
 }
 
+.watch-form textarea,
+.crm-form textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
 .watch-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.crm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.crm-form {
+  border: 1px solid #e1e7ee;
+  border-radius: 8px;
+  background: #fbfcfd;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.wide-form {
+  grid-column: 1 / -1;
+}
+
+.crm-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.crm-form button {
+  justify-self: start;
 }
 
 .content {
@@ -477,5 +517,9 @@ tbody tr:hover {
 
   .watch-form {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wide-form {
+    grid-column: auto;
   }
 }

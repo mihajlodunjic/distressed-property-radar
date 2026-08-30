@@ -32,6 +32,7 @@ from app.domain.enums import (
     DealAnalysisStatus,
     DealScenarioType,
     FastSaleStatus,
+    InteractionType,
     LiquidityStatus,
     ListingEventType,
     ListingRawRecordType,
@@ -39,14 +40,18 @@ from app.domain.enums import (
     LlmAnalysisStatus,
     MatchCandidateStatus,
     MatchDecision,
+    OfferStatus,
     OpportunityAction,
+    PropertyOutcomeType,
     PropertyPipelineStatus,
+    PropertyReviewDecision,
     PropertyType,
     ReasonForSale,
     RiskGateEffect,
     RiskGateStatus,
     RiskSeverity,
     SellerType,
+    SkipReasonCode,
     SourceHealthStatus,
     ValuationModelType,
     ValuationStatus,
@@ -254,6 +259,34 @@ class Property(Base):
         cascade="all, delete-orphan",
     )
     watch_trigger_events: Mapped[list[WatchTriggerEvent]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    reviews: Mapped[list[PropertyReview]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    interactions: Mapped[list[Interaction]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    offers: Mapped[list[Offer]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    skip_records: Mapped[list[SkipRecord]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    outcomes: Mapped[list[PropertyOutcome]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    overrides: Mapped[list[PropertyOverride]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    pipeline_events: Mapped[list[PipelineStatusEvent]] = relationship(
         back_populates="property",
         cascade="all, delete-orphan",
     )
@@ -562,6 +595,283 @@ class WatchTriggerEvent(Base):
 
     watch_rule: Mapped[WatchRule] = relationship(back_populates="trigger_events")
     property: Mapped[Property] = relationship(back_populates="watch_trigger_events")
+
+
+class PropertyReview(Base):
+    __tablename__ = "property_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decision: Mapped[PropertyReviewDecision] = mapped_column(
+        _enum_column(PropertyReviewDecision, 24),
+        nullable=False,
+    )
+    manual_fmv: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    manual_fast_sale_value: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    manual_max_buy_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="reviews")
+
+
+class Interaction(Base):
+    __tablename__ = "interactions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    interaction_type: Mapped[InteractionType] = mapped_column(
+        _enum_column(InteractionType, 24),
+        nullable=False,
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    follow_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    follow_up_notes: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="interactions")
+    call_feedback: Mapped[CallFeedback | None] = relationship(
+        back_populates="interaction",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    visit_feedback: Mapped[VisitFeedback | None] = relationship(
+        back_populates="interaction",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class CallFeedback(Base):
+    __tablename__ = "call_feedback"
+
+    interaction_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("interactions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    seller_motivation: Mapped[AnalysisLevel | None] = mapped_column(_enum_column(AnalysisLevel, 16))
+    reason_for_sale: Mapped[ReasonForSale | None] = mapped_column(_enum_column(ReasonForSale, 40))
+    lowest_indicated_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    cash_preferred: Mapped[bool | None] = mapped_column(Boolean)
+    desired_closing_days: Mapped[int | None] = mapped_column(Integer)
+    viewing_available: Mapped[bool | None] = mapped_column(Boolean)
+    claimed_registered: Mapped[bool | None] = mapped_column(Boolean)
+    claimed_owner_1_1: Mapped[bool | None] = mapped_column(Boolean)
+    claimed_mortgage: Mapped[bool | None] = mapped_column(Boolean)
+    tenant_present: Mapped[bool | None] = mapped_column(Boolean)
+    structured_notes_json: Mapped[dict[str, object]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
+
+    interaction: Mapped[Interaction] = relationship(back_populates="call_feedback")
+
+
+class VisitFeedback(Base):
+    __tablename__ = "visit_feedback"
+
+    interaction_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("interactions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    condition_category: Mapped[str | None] = mapped_column(String(100))
+    estimated_renovation_low: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    estimated_renovation_base: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    estimated_renovation_high: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    layout_score: Mapped[int | None] = mapped_column(Integer)
+    light_score: Mapped[int | None] = mapped_column(Integer)
+    noise_score: Mapped[int | None] = mapped_column(Integer)
+    building_score: Mapped[int | None] = mapped_column(Integer)
+    entrance_score: Mapped[int | None] = mapped_column(Integer)
+    parking_score: Mapped[int | None] = mapped_column(Integer)
+    elevator_verified: Mapped[bool | None] = mapped_column(Boolean)
+    visible_defects_json: Mapped[list[object]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+    )
+    manual_fmv: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    manual_fast_sale_value: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    manual_max_buy_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    interaction: Mapped[Interaction] = relationship(back_populates="visit_feedback")
+
+
+class Offer(Base):
+    __tablename__ = "offers"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    offered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    currency: Mapped[CurrencyCode] = mapped_column(_enum_column(CurrencyCode, 3), nullable=False)
+    offer_type: Mapped[str | None] = mapped_column(String(40))
+    conditions_json: Mapped[dict[str, object]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+    )
+    status: Mapped[OfferStatus] = mapped_column(_enum_column(OfferStatus, 20), nullable=False)
+    seller_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    counteroffer_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="offers")
+
+
+class SkipRecord(Base):
+    __tablename__ = "skip_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    reason_code: Mapped[SkipReasonCode] = mapped_column(
+        _enum_column(SkipReasonCode, 32),
+        nullable=False,
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+    skipped_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    property: Mapped[Property] = relationship(back_populates="skip_records")
+
+
+class PropertyOutcome(Base):
+    __tablename__ = "property_outcomes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    outcome_type: Mapped[PropertyOutcomeType] = mapped_column(
+        _enum_column(PropertyOutcomeType, 32),
+        nullable=False,
+    )
+    outcome_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sale_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    currency: Mapped[CurrencyCode | None] = mapped_column(_enum_column(CurrencyCode, 3))
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    source_kind: Mapped[DataSourceKind | None] = mapped_column(_enum_column(DataSourceKind, 32))
+    source_reference: Mapped[str | None] = mapped_column(String(255))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="outcomes")
+
+
+class PropertyOverride(Base):
+    __tablename__ = "property_overrides"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    field_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    value_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    source_kind: Mapped[DataSourceKind] = mapped_column(
+        _enum_column(DataSourceKind, 32),
+        nullable=False,
+    )
+    source_reference: Mapped[str | None] = mapped_column(String(255))
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="overrides")
+
+
+class PipelineStatusEvent(Base):
+    __tablename__ = "pipeline_status_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    old_status: Mapped[PropertyPipelineStatus | None] = mapped_column(
+        _enum_column(PropertyPipelineStatus, 40)
+    )
+    new_status: Mapped[PropertyPipelineStatus] = mapped_column(
+        _enum_column(PropertyPipelineStatus, 40),
+        nullable=False,
+    )
+    source_kind: Mapped[DataSourceKind] = mapped_column(
+        _enum_column(DataSourceKind, 32),
+        nullable=False,
+    )
+    source_reference: Mapped[str | None] = mapped_column(String(255))
+    reason: Mapped[str | None] = mapped_column(Text)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="pipeline_events")
 
 
 class ListingRawRecord(Base):

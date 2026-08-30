@@ -152,6 +152,169 @@ export type WatchlistResponse = {
   pagination: Pagination;
 };
 
+export type PropertyReview = {
+  review_id: string;
+  property_id: string;
+  reviewed_at: string | null;
+  decision: string;
+  manual_fmv: string | null;
+  manual_fast_sale_value: string | null;
+  manual_max_buy_price: string | null;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type CallFeedback = {
+  seller_motivation: string | null;
+  reason_for_sale: string | null;
+  lowest_indicated_price: string | null;
+  cash_preferred: boolean | null;
+  desired_closing_days: number | null;
+  viewing_available: boolean | null;
+  claimed_registered: boolean | null;
+  claimed_owner_1_1: boolean | null;
+  claimed_mortgage: boolean | null;
+  tenant_present: boolean | null;
+  structured_notes: Record<string, unknown>;
+};
+
+export type VisitFeedback = {
+  condition_category: string | null;
+  estimated_renovation_low: string | null;
+  estimated_renovation_base: string | null;
+  estimated_renovation_high: string | null;
+  layout_score: number | null;
+  light_score: number | null;
+  noise_score: number | null;
+  building_score: number | null;
+  entrance_score: number | null;
+  parking_score: number | null;
+  elevator_verified: boolean | null;
+  visible_defects: unknown[];
+  manual_fmv: string | null;
+  manual_fast_sale_value: string | null;
+  manual_max_buy_price: string | null;
+  notes: string | null;
+};
+
+export type InteractionRecord = {
+  interaction_id: string;
+  property_id: string;
+  interaction_type: string;
+  occurred_at: string | null;
+  follow_up_at: string | null;
+  follow_up_notes: string | null;
+  notes: string | null;
+  created_at: string | null;
+  call_feedback: CallFeedback | null;
+  visit_feedback: VisitFeedback | null;
+};
+
+export type OfferRecord = {
+  offer_id: string;
+  property_id: string;
+  offered_at: string | null;
+  amount: string | null;
+  currency: string | null;
+  offer_type: string | null;
+  conditions: Record<string, unknown>;
+  status: string;
+  seller_response_at: string | null;
+  counteroffer_amount: string | null;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type SkipRecord = {
+  skip_record_id: string;
+  property_id: string;
+  reason_code: string;
+  notes: string | null;
+  skipped_at: string | null;
+};
+
+export type PropertyOutcome = {
+  outcome_id: string;
+  property_id: string;
+  outcome_type: string;
+  outcome_date: string | null;
+  sale_price: string | null;
+  currency: string | null;
+  confidence: string | null;
+  source_kind: string | null;
+  source_reference: string | null;
+  notes: string | null;
+  created_at: string | null;
+};
+
+export type PropertyOverride = {
+  override_id: string;
+  property_id: string;
+  field_name: string;
+  value: unknown;
+  source_kind: string;
+  source_reference: string | null;
+  reason: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type PipelineStatusEvent = {
+  pipeline_status_event_id: string;
+  property_id: string;
+  old_status: string | null;
+  new_status: string;
+  source_kind: string;
+  source_reference: string | null;
+  reason: string | null;
+  occurred_at: string | null;
+  created_at: string | null;
+};
+
+export type AcquisitionTimelineItem = {
+  type: string;
+  occurred_at: string | null;
+  summary: string | null;
+  record_id: string;
+  notes: string | null;
+  follow_up_at?: string | null;
+  follow_up_notes?: string | null;
+};
+
+export type AcquisitionDetail = {
+  pipeline_status: string;
+  pipeline_status_updated_at: string | null;
+  reviews: PropertyReview[];
+  interactions: InteractionRecord[];
+  offers: OfferRecord[];
+  skip_records: SkipRecord[];
+  outcomes: PropertyOutcome[];
+  overrides: PropertyOverride[];
+  pipeline_events: PipelineStatusEvent[];
+  timeline: AcquisitionTimelineItem[];
+};
+
+export type PipelineItem = PropertyListItem & {
+  pipeline: {
+    status: string;
+    status_updated_at: string | null;
+    latest_review: PropertyReview | null;
+    latest_interaction: InteractionRecord | null;
+    next_follow_up: InteractionRecord | null;
+    latest_offer: OfferRecord | null;
+    latest_skip: SkipRecord | null;
+    latest_outcome: PropertyOutcome | null;
+  };
+};
+
+export type PipelineResponse = {
+  items: PipelineItem[];
+  pagination: Pagination;
+  summary: Record<string, number>;
+};
+
 export type PropertyDetail = {
   property: Record<string, unknown> & {
     property_id: string;
@@ -189,6 +352,7 @@ export type PropertyDetail = {
     active_rule: WatchRule | null;
     latest_changes: WatchTriggerEvent[];
   };
+  acquisition: AcquisitionDetail;
   comparables: {
     status: string;
     items: Array<Record<string, unknown> & { comparable_type: string }>;
