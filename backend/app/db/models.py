@@ -32,6 +32,8 @@ from app.domain.enums import (
     DealAnalysisStatus,
     DealScenarioType,
     FastSaleStatus,
+    HistoricalEvaluationClassification,
+    HistoricalEvaluationRunStatus,
     InteractionType,
     LiquidityStatus,
     ListingEventType,
@@ -51,6 +53,8 @@ from app.domain.enums import (
     RiskGateStatus,
     RiskSeverity,
     SellerType,
+    ShadowDealStatus,
+    ShadowOutcomeStatus,
     SkipReasonCode,
     SourceHealthStatus,
     ValuationModelType,
@@ -279,6 +283,14 @@ class Property(Base):
         cascade="all, delete-orphan",
     )
     outcomes: Mapped[list[PropertyOutcome]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    shadow_deals: Mapped[list[ShadowDeal]] = relationship(
+        back_populates="property",
+        cascade="all, delete-orphan",
+    )
+    historical_evaluation_items: Mapped[list[HistoricalEvaluationItem]] = relationship(
         back_populates="property",
         cascade="all, delete-orphan",
     )
@@ -808,6 +820,12 @@ class PropertyOutcome(Base):
     )
 
     property: Mapped[Property] = relationship(back_populates="outcomes")
+    shadow_deal_outcomes: Mapped[list[ShadowDealOutcome]] = relationship(
+        back_populates="property_outcome",
+    )
+    historical_evaluation_items: Mapped[list[HistoricalEvaluationItem]] = relationship(
+        back_populates="property_outcome",
+    )
 
 
 class PropertyOverride(Base):
@@ -1610,6 +1628,10 @@ class DealAnalysis(Base):
     opportunity_assessments: Mapped[list[OpportunityAssessment]] = relationship(
         back_populates="deal_analysis",
     )
+    shadow_deals: Mapped[list[ShadowDeal]] = relationship(back_populates="deal_analysis")
+    historical_evaluation_items: Mapped[list[HistoricalEvaluationItem]] = relationship(
+        back_populates="deal_analysis",
+    )
 
 
 class DealScenario(Base):
@@ -1678,6 +1700,191 @@ class OpportunityAssessment(Base):
     alerts: Mapped[list[Alert]] = relationship(
         back_populates="opportunity_assessment",
         cascade="all, delete-orphan",
+    )
+    shadow_deals: Mapped[list[ShadowDeal]] = relationship(
+        back_populates="opportunity_assessment",
+    )
+    historical_evaluation_items: Mapped[list[HistoricalEvaluationItem]] = relationship(
+        back_populates="opportunity_assessment",
+    )
+
+
+class ShadowDeal(Base):
+    __tablename__ = "shadow_deals"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    opportunity_assessment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("opportunity_assessments.id", ondelete="SET NULL"),
+    )
+    deal_analysis_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("deal_analyses.id", ondelete="SET NULL"),
+    )
+    simulated_buy_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    simulated_buy_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    assumed_total_cost_basis: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    expected_exit_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    expected_holding_days: Mapped[int | None] = mapped_column(Integer)
+    expected_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    decision_action: Mapped[OpportunityAction | None] = mapped_column(
+        _enum_column(OpportunityAction, 24),
+    )
+    status: Mapped[ShadowDealStatus] = mapped_column(
+        _enum_column(ShadowDealStatus, 16),
+        nullable=False,
+        default=ShadowDealStatus.OPEN,
+    )
+    input_snapshot_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    model_versions_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    property: Mapped[Property] = relationship(back_populates="shadow_deals")
+    opportunity_assessment: Mapped[OpportunityAssessment | None] = relationship(
+        back_populates="shadow_deals",
+    )
+    deal_analysis: Mapped[DealAnalysis | None] = relationship(back_populates="shadow_deals")
+    outcomes: Mapped[list[ShadowDealOutcome]] = relationship(
+        back_populates="shadow_deal",
+        cascade="all, delete-orphan",
+    )
+
+
+class ShadowDealOutcome(Base):
+    __tablename__ = "shadow_deal_outcomes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    shadow_deal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("shadow_deals.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    property_outcome_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("property_outcomes.id", ondelete="SET NULL"),
+    )
+    evaluation_as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    outcome_status: Mapped[ShadowOutcomeStatus] = mapped_column(
+        _enum_column(ShadowOutcomeStatus, 16),
+        nullable=False,
+    )
+    actual_observed_outcome: Mapped[PropertyOutcomeType | None] = mapped_column(
+        _enum_column(PropertyOutcomeType, 32),
+    )
+    actual_observed_price: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    actual_observed_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    simulated_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    simulated_roi: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    evaluation_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    outcome_summary_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    shadow_deal: Mapped[ShadowDeal] = relationship(back_populates="outcomes")
+    property_outcome: Mapped[PropertyOutcome | None] = relationship(
+        back_populates="shadow_deal_outcomes",
+    )
+
+
+class HistoricalEvaluationRun(Base):
+    __tablename__ = "historical_evaluation_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    prediction_as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    evaluation_as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    evaluation_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[HistoricalEvaluationRunStatus] = mapped_column(
+        _enum_column(HistoricalEvaluationRunStatus, 16),
+        nullable=False,
+    )
+    input_scope_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    metrics_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    items: Mapped[list[HistoricalEvaluationItem]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+
+
+class HistoricalEvaluationItem(Base):
+    __tablename__ = "historical_evaluation_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid_pk)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("historical_evaluation_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    property_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("properties.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    opportunity_assessment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("opportunity_assessments.id", ondelete="SET NULL"),
+    )
+    deal_analysis_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("deal_analyses.id", ondelete="SET NULL"),
+    )
+    property_outcome_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("property_outcomes.id", ondelete="SET NULL"),
+    )
+    recommended_action: Mapped[OpportunityAction | None] = mapped_column(
+        _enum_column(OpportunityAction, 24),
+    )
+    classification: Mapped[HistoricalEvaluationClassification] = mapped_column(
+        _enum_column(HistoricalEvaluationClassification, 24),
+        nullable=False,
+    )
+    opportunity_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    ranking_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    expected_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    downside_profit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    roi: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    outcome_type: Mapped[PropertyOutcomeType | None] = mapped_column(
+        _enum_column(PropertyOutcomeType, 32),
+    )
+    snapshot_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    explanation_json: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    run: Mapped[HistoricalEvaluationRun] = relationship(back_populates="items")
+    property: Mapped[Property] = relationship(back_populates="historical_evaluation_items")
+    opportunity_assessment: Mapped[OpportunityAssessment | None] = relationship(
+        back_populates="historical_evaluation_items",
+    )
+    deal_analysis: Mapped[DealAnalysis | None] = relationship(
+        back_populates="historical_evaluation_items",
+    )
+    property_outcome: Mapped[PropertyOutcome | None] = relationship(
+        back_populates="historical_evaluation_items",
     )
 
 

@@ -99,6 +99,31 @@ class PropertyOutcomeType(StrEnum):
     OTHER = "OTHER"
 
 
+class ShadowDealStatus(StrEnum):
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+    ABANDONED = "ABANDONED"
+
+
+class ShadowOutcomeStatus(StrEnum):
+    OPEN = "OPEN"
+    MEASURED = "MEASURED"
+    UNKNOWN = "UNKNOWN"
+
+
+class HistoricalEvaluationRunStatus(StrEnum):
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+
+
+class HistoricalEvaluationClassification(StrEnum):
+    TRUE_POSITIVE = "TRUE_POSITIVE"
+    FALSE_POSITIVE = "FALSE_POSITIVE"
+    FALSE_NEGATIVE = "FALSE_NEGATIVE"
+    TRUE_NEGATIVE = "TRUE_NEGATIVE"
+    UNKNOWN = "UNKNOWN"
+
+
 class DataSourceKind(StrEnum):
     SCRAPED = "SCRAPED"
     DERIVED = "DERIVED"

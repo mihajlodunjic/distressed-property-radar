@@ -8,11 +8,11 @@
 ## Current State
 
     Project status: IN_PROGRESS
-    Current phase: PHASE 16 - Historical Evaluation & Shadow Portfolio
-    Current task: Phase 16 - implement historical as-of evaluation and shadow-deal foundation
+    Current phase: PHASE 17 - Transaction Data Enrichment
+    Current task: Phase 17 - validate first real transaction data source/import format
     Task state: READY
 
-Phase 15 is complete.
+Phase 16 is complete.
 
 ## Completed Phases
 
@@ -32,10 +32,11 @@ Phase 15 is complete.
     PHASE 13 - Acquisition CRM & Human Feedback: COMPLETED
     PHASE 14 - Reliability, Monitoring & Production Hardening: COMPLETED
     PHASE 15 - Second Source & Cross-Portal Validation: COMPLETED
+    PHASE 16 - Historical Evaluation & Shadow Portfolio: COMPLETED
 
 ## Completed Tasks
 
-- Phase 15 second-source and cross-portal validation is implemented and verified: shared source crawl persistence, Nekretnine.rs adapter/parser/fixtures, second-source seeding/config/CLI, worker scheduling for both sources, cross-source listing/property matching, lifecycle/outage safety, independent listing histories, and backend/frontend/runtime checks.
+- Phase 16 historical evaluation and shadow portfolio foundation is implemented and verified: as-of property snapshots, frozen shadow-deal assumptions, shadow outcome measurements, no-lookahead historical evaluation runs, outcome metrics/classification, migration workflow, and backend/frontend/runtime checks.
 
 ## Current Implementation Facts
 
@@ -43,9 +44,9 @@ Phase 15 is complete.
 - Backend configuration: centralized settings in `backend/app/core/config.py`, loaded from environment variables and optional root `.env`.
 - Backend logging: centralized text/JSON logging exists with optional rotating file output, request IDs, request timing logs, startup environment/app-version/process/DB-reachability fields, and no secret logging.
 - Database: SQLAlchemy engine/session foundation exists in `backend/app/db`.
-- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, `RiskGateEffect`, `DealAnalysisStatus`, `DealScenarioType`, `OpportunityAction`, `AlertChannel`, `AlertType`, `AlertStatus`, `WatchRuleType`, `AnalysisStatus`, `PropertyReviewDecision`, `InteractionType`, `OfferStatus`, `SkipReasonCode`, and `PropertyOutcomeType` exist in `backend/app/domain/enums.py`.
-- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, `CostProfile`, `InvestmentProfile`, `DealAnalysis`, `DealScenario`, `OpportunityAssessment`, `Alert`, `PropertyAnalysisState`, `WatchRule`, `WatchTriggerEvent`, `JobRun`, `PropertyReview`, `Interaction`, `CallFeedback`, `VisitFeedback`, `Offer`, `SkipRecord`, `PropertyOutcome`, `PropertyOverride`, and `PipelineStatusEvent` exist in `backend/app/db/models.py`.
-- Migrations: Alembic is configured; current head is `0014_second_source_nekretnine_rs`.
+- Domain enums: Phase 1 enums plus `ListingRawRecordType`, `SourceHealthStatus`, `MatchDecision`, `MatchCandidateStatus`, `ComparableType`, `ValuationStatus`, `ValuationModelType`, `LiquidityStatus`, `FastSaleStatus`, `AnalysisLevel`, `ReasonForSale`, `LlmAnalysisStatus`, `RiskGateStatus`, `RiskSeverity`, `RiskGateEffect`, `DealAnalysisStatus`, `DealScenarioType`, `OpportunityAction`, `AlertChannel`, `AlertType`, `AlertStatus`, `WatchRuleType`, `AnalysisStatus`, `PropertyReviewDecision`, `InteractionType`, `OfferStatus`, `SkipReasonCode`, `PropertyOutcomeType`, `ShadowDealStatus`, `ShadowOutcomeStatus`, `HistoricalEvaluationRunStatus`, and `HistoricalEvaluationClassification` exist in `backend/app/domain/enums.py`.
+- ORM models: `Source`, `SourceRuntimeState`, `Property`, `Listing`, `ListingEvent`, `ListingRawRecord`, `PropertyListingLink`, `PropertyMatchCandidate`, `PropertyFeature`, `DataQualityAssessment`, `ComparableSet`, `ComparableItem`, `Valuation`, `LiquidityAssessment`, `FastSaleEstimate`, `LlmAnalysis`, `SellerAssessment`, `RiskAssessment`, `RiskFlag`, `CostProfile`, `InvestmentProfile`, `DealAnalysis`, `DealScenario`, `OpportunityAssessment`, `Alert`, `PropertyAnalysisState`, `WatchRule`, `WatchTriggerEvent`, `JobRun`, `PropertyReview`, `Interaction`, `CallFeedback`, `VisitFeedback`, `Offer`, `SkipRecord`, `PropertyOutcome`, `PropertyOverride`, `PipelineStatusEvent`, `ShadowDeal`, `ShadowDealOutcome`, `HistoricalEvaluationRun`, and `HistoricalEvaluationItem` exist in `backend/app/db/models.py`.
+- Migrations: Alembic is configured; current head is `0015_historical_evaluation`.
 - Runtime health: `GET /live` reports process liveness, `GET /health` checks PostgreSQL/PostGIS, and `GET /ready` checks database, PostGIS, Alembic head, and blocking production configuration.
 - Operations status: `GET /api/v1/operations/status` and `python -m app.operations.status` report readiness, scheduler ownership, database/disk metrics, backup state, source health, job health, analysis state, and alert queues.
 - Worker runtime: `python -m app.operations.worker` provides the single-owner background worker loop and one-shot smoke mode, schedules 4zida and Nekretnine.rs independently, and keeps API runtime from running the scheduler implicitly.
@@ -138,6 +139,11 @@ Phase 15 is complete.
 - Acquisition workflow module: `backend/app/acquisition/acquisition_service.py` implements review, pipeline-status, call feedback, visit feedback, offer, skip, and outcome commands with auditable pipeline status events.
 - Call feedback is used as persisted manual seller/risk input during seller/risk reanalysis; visit feedback records verified manual overrides for relevant property facts without overwriting listing history.
 - Phase 13 reanalysis preserves historical analytical rows and creates new downstream seller/risk/deal/opportunity rows when relevant manual feedback is recorded; property-fact changes from verified visits can also refresh features/comparables/valuation/liquidity/fast-sale.
+- Historical evaluation module: `backend/app/evaluation/historical.py` implements `historical_property_snapshot_v1`, `historical_evaluation_v1`, and `shadow_outcome_v1`.
+- Historical snapshots reconstruct listing state from property-listing links and listing events up to `as_of`, choose analytical rows by latest `as_of <= cutoff`, include only manual inputs known by the cutoff, and include outcomes only when both `outcome_date` and `created_at` are within the cutoff.
+- Shadow deals persist simulated buy date/price, expected exit/holding/profit assumptions, linked opportunity/deal analysis, frozen `input_snapshot_json`, and frozen `model_versions_json`; later current analysis or investment profile changes do not rewrite the shadow deal.
+- Shadow outcome measurements are separate `shadow_deal_outcomes` rows linked to property outcomes and preserve the original shadow-deal snapshot hash and model versions.
+- Historical evaluation runs separate `prediction_as_of` inputs from `evaluation_as_of` outcome measurement, classify true/false positives/negatives or unknown, and persist reproducible item snapshots and summary metrics without overwriting analytical history.
 - Dashboard API: `backend/app/api/dashboard.py` exposes `GET /api/v1/action-queue`, `GET /api/v1/properties`, `GET /api/v1/properties/{id}`, `GET /api/v1/properties/{id}/history`, `GET /api/v1/watchlist`, `GET /api/v1/pipeline`, `POST /api/v1/properties/{id}/watch`, `DELETE /api/v1/properties/{id}/watch`, `POST /api/v1/properties/{id}/reanalyze`, `POST /api/v1/properties/{id}/review`, `PATCH /api/v1/properties/{id}/pipeline-status`, `POST /api/v1/properties/{id}/interactions/call`, `POST /api/v1/properties/{id}/interactions/visit`, `POST /api/v1/properties/{id}/offers`, `PATCH /api/v1/offers/{id}`, `POST /api/v1/properties/{id}/skip`, `POST /api/v1/properties/{id}/outcomes`, `GET /api/v1/sources`, and `GET /api/v1/settings`.
 - API access: `backend/app/api/dependencies.py` provides DB-session dependency and a single-user bearer-token guard. If `API_ACCESS_TOKEN` is configured it is required; production fails closed when the token is missing. Local development/test can run without a token.
 - API routing/CORS: `backend/app/main.py` registers `/api/v1/health`, the dashboard router, non-wildcard CORS origins from `CORS_ALLOWED_ORIGINS`, and CORS methods required by the current dashboard writes.
@@ -157,6 +163,7 @@ Phase 15 is complete.
 - Backend tests also cover Phase 13 acquisition workflow table creation, alert-to-review-call-visit-offer-outcome flow, pipeline API, validation/not-found cases, manual call precedence, verified visit overrides, feedback-triggered reanalysis, skip atomicity, and separate historical persistence tables.
 - Backend tests also cover Phase 14 liveness/readiness, production fail-closed readiness, request IDs, private operations status, stale-job recovery idempotency, source-health alert dedupe, backup/restore command construction, backup retention, raw-record retention safety, and bounded failure reporting.
 - Backend tests also cover Phase 15 Nekretnine.rs parser/adapter fixtures, shared ingestion regression for both sources, cross-source obvious matches/non-matches/ambiguous candidates, multiple independent listing histories per property, source outage/parser-failure lifecycle safety, and first-source regression.
+- Backend tests also cover Phase 16 table creation, as-of snapshot no-lookahead behavior for future price/text/manual/outcome/recommendation data, shadow-deal immutability, outcome cutoff checks, preserved analytical history, and historical evaluation metrics/classification.
 - Frontend tests cover UNKNOWN rendering, critical status formatting for STALE/FAILED/BLOCK, and watch-trigger formatting. Frontend build/typecheck is configured through `npm run build`; no separate frontend lint script exists.
 - Health endpoints: `GET /live` and `GET /api/v1/live` check process liveness; `GET /health` and `GET /api/v1/health` check application process, PostgreSQL connectivity, and PostGIS availability; `GET /ready` and `GET /api/v1/ready` check database, PostGIS, migrations, and blocking production config.
 - Frontend: Vite React dashboard exists under `frontend`.
@@ -166,7 +173,9 @@ Phase 15 is complete.
 
 ## Known Blockers
 
-    None
+    Transaction importer implementation must not begin until a concrete legal/access-approved
+    transaction source or import file format is known, including licensing/terms, coverage,
+    precision and update cadence.
 
 ## Known Important Issues
 
@@ -183,21 +192,19 @@ Phase 15 is complete.
 
 Implement only:
 
-    PHASE 16 - Historical Evaluation & Shadow Portfolio
+    PHASE 17 - Transaction Data Enrichment
 
 Exact first logical task:
 
-    Implement historical as-of reconstruction and shadow-deal persistence:
-    define the minimal shadow-deal/evaluation persistence needed by Phase 16,
-    preserve immutable linked analytical inputs, and prove historical queries
-    answer what the system knew and recommended at a past date without
-    look-ahead bias.
+    Validate the first real transaction data source/import format before implementation:
+    confirm legal/access status, licensing/terms, format, coverage, precision and update cadence,
+    then define the minimal importer/comparable scope only for that real source.
 
 Do not implement:
 
-- Phase 17 transaction data enrichment;
+- Phase 18 model calibration or ML;
 - new market expansion;
-- large infrastructure redesign beyond the modular monolith.
+- importer/parser code for an invented or unavailable transaction-data format.
 
 ## Required Context
 
@@ -208,47 +215,38 @@ Read first:
 Then:
 
     docs/07-phase-plan.md
-    -> PHASE 16 - Historical Evaluation & Shadow Portfolio
+    -> PHASE 17 - Transaction Data Enrichment
 
 Relevant specification sections only:
 
     docs/03-data-model.md
-    -> property_outcomes
-    -> shadow_deals, if present/required
-    -> analytical history
-    -> model versioning
-    -> as_of/history invariants
+    -> transaction_records
+    -> transaction_property_matches
+    -> comparable_sets/items
+    -> provenance/history invariants
 
     docs/05-analysis-specification.md
-    -> Historical as_of
-    -> Look-Ahead Bias
-    -> Backtesting
-    -> False Positives / Negatives
-    -> Confidence Calibration
+    -> Comparable Types
+    -> Transaction Recency
+    -> Fair Value
+    -> Valuation Confidence
 
     docs/08-testing-specification.md
-    -> Phase 16 look-ahead protection
-    -> as-of reconstruction
-    -> shadow-deal immutability
-    -> outcome/history queries
+    -> transaction import/comparable coverage if a real source is available
+    -> no-lookahead protection for transaction comparables
 
 Existing implementation to inspect:
 
     backend/app/db/models.py
-    backend/app/opportunities/opportunity_engine.py
-    backend/app/deals/deal_engine.py
     backend/app/valuation/comparable_engine.py
-    backend/app/acquisition/acquisition_service.py
-    backend/app/api/dashboard.py
-    backend/tests/test_opportunity_alerts.py
-    backend/tests/test_deal_engine.py
-    backend/tests/test_acquisition_crm.py
+    backend/tests/test_valuation.py
+    backend/tests/test_historical_evaluation.py
 
-Do not load Phase 17+ specifications unless a concrete Phase 16 dependency requires them.
+Do not load Phase 18+ specifications unless a concrete Phase 17 dependency requires them.
 
-## Phase 16 Scope Guard
+## Phase 17 Scope Guard
 
-Phase 16 is about historical evaluation, shadow deals, as-of reconstruction, and look-ahead protection. Do not implement transaction-data enrichment or new source expansion.
+Phase 17 requires a real transaction source or supplied import format. Do not invent a transaction-data format and do not treat transaction comps and listing comps as the same evidence.
 
 ## Update Rules
 
